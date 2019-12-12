@@ -477,7 +477,8 @@ public:
 	void push_back(value_type value)
 	{
 		amortized_resize(size() + 1);
-		*(end() - 1) = value;
+		auto why = back();
+		why = value;
 	}
 
 	//! Remove element at the end.
