@@ -297,6 +297,7 @@ public:
 
 private:
 	size_type	  m_size;  //!< Number of bits needed to store int_vector.
+	size_type cache;
 	size_type	  m_capacity; //!< Number of bits reserved by int_vector.
 	uint64_t*	  m_data;  //!< Pointer to the memory for the bits.
 	int_width_type m_width; //!< Width of the integers.
@@ -308,6 +309,7 @@ private:
 	{
 		assert(growth_factor > 1.0);
 		m_size = size * m_width;
+		cache = size;
 		if (m_size > m_capacity || m_data == nullptr) {
 			// start with 64 bit if vector has no capacity
 			size_type tmp_capacity = m_capacity == 0 ? 64 : m_capacity;
@@ -1521,6 +1523,7 @@ void int_vector<t_width>::bit_resize(const size_type size)
 		memory_manager::resize(*this, size);
 	}
 	m_size = size;
+	cache = m_size / m_width;
 }
 
 template <uint8_t t_width>
@@ -1566,40 +1569,8 @@ inline void int_vector<t_width>::set_int(size_type idx, value_type x, const uint
 
 template <uint8_t t_width>
 inline typename int_vector<t_width>::size_type int_vector<t_width>::size() const noexcept {
-    return m_size / m_width;
+    return cache;
 }
-
-// specialized size method for 64-bit integer vector
-template <>
-inline typename int_vector<64>::size_type int_vector<64>::size() const noexcept {
-    return m_size>>6;
-}
-
-// specialized size method for 32-bit integer vector
-template <>
-inline typename int_vector<32>::size_type int_vector<32>::size() const noexcept {
-    return m_size>>5;
-}
-
-// specialized size method for 64-bit integer vector
-template <>
-inline typename int_vector<16>::size_type int_vector<16>::size() const noexcept {
-    return m_size>>4;
-}
-
-// specialized size method for 64-bit integer vector
-template <>
-inline typename int_vector<8>::size_type int_vector<8>::size() const noexcept {
-    return m_size>>3;
-}
-
-// specialized size method for bit_vector
-template <>
-inline typename int_vector<1>::size_type int_vector<1>::size() const noexcept {
-    return m_size;
-}
-
-
 
 template <uint8_t t_width>
 inline typename int_vector<t_width>::size_type int_vector<t_width>::capacity() const noexcept {
