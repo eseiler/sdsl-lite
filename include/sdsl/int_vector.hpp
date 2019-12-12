@@ -307,16 +307,15 @@ private:
 	void amortized_resize(const size_type size)
 	{
 		assert(growth_factor > 1.0);
-		size_type bit_size = size * m_width;
-		if (bit_size > m_capacity || m_data == nullptr) {
+		m_size = size * m_width;
+		if (m_size > m_capacity || m_data == nullptr) {
 			// start with 64 bit if vector has no capacity
 			size_type tmp_capacity = m_capacity == 0 ? 64 : m_capacity;
 			// find smallest x s.t. m_capacity * 1.5 ** x >= size
-			auto resize_factor = pow(growth_factor, std::ceil(std::log((bit_size + tmp_capacity - 1) / tmp_capacity) / std::log(growth_factor)));
+			auto resize_factor = pow(growth_factor, std::ceil(std::log((m_size + tmp_capacity - 1) / tmp_capacity) / std::log(growth_factor)));
 			size_type new_capacity = std::ceil(tmp_capacity * resize_factor);
 			memory_manager::resize(*this, new_capacity);
 		}
-		m_size = size * m_width;
 	}
 
 	// The number of 64-bit words used by the int_vector.
