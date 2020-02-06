@@ -59,7 +59,7 @@
 //! Namespace for the succinct data structure library.
 namespace sdsl {
 
-template <uint8_t>
+template <uint8_t, bool>
 class int_vector; // forward declaration
 
 
@@ -116,7 +116,8 @@ inline void cyclic_shifts(uint64_t* vec, uint8_t & n, uint64_t k, uint8_t int_wi
  *   words and then repeatedly inserts these words into v.
  */
 template <class t_int_vec>
-void set_to_value(t_int_vec& v, uint64_t k);
+typename std::enable_if<t_int_vec::waste_bits, void>::type
+set_to_value(t_int_vec& v, uint64_t k);
 
 //! Set all entries of int_vector starting from iterator it to value k
 /*! \param  v The int_vector which should be set
@@ -127,7 +128,8 @@ void set_to_value(t_int_vec& v, uint64_t k);
  *   words and then repeatedly inserts these words into v.
  */
 template <class t_int_vec, class t_int_vec_iterator>
-void set_to_value(t_int_vec& v, uint64_t k, t_int_vec_iterator it);
+typename std::enable_if<t_int_vec::waste_bits, void>::type
+set_to_value(t_int_vec& v, uint64_t k, t_int_vec_iterator it);
 
 //! Sets each entry of the numerical vector v at position \$fi\f$ to value \$fi\$f
 template <class t_int_vec>
@@ -564,7 +566,36 @@ inline void util::cyclic_shifts(uint64_t* vec, uint8_t & n, uint64_t k, uint8_t 
 }
 
 template <class t_int_vec>
-void util::set_to_value(t_int_vec& v, uint64_t k)
+typename std::enable_if<t_int_vec::waste_bits, void>::type
+util::set_to_value(t_int_vec& v, uint64_t k)
+{
+	uint64_t* data = v.data();
+	if (v.empty()) return;
+	uint8_t int_width = v.width();
+	if (int_width == 0) {
+		throw std::logic_error("util::set_to_value can not be performed with int_width=0!");
+	}
+	if (0 == k) {
+		_set_zero_bits(v);
+		return;
+	}
+	if (bits::lo_set[int_width] == k) {
+		_set_one_bits(v);
+		return;
+	}
+
+	uint64_t the_value{0};
+	k &= bits::lo_set[int_width];
+	for (uint8_t i = 0; i <= 64 - int_width; i += int_width)
+		the_value |= (k << i);
+
+	for (size_t i = 0; i < (v.bit_size() + 63) >> 6; ++i)
+		*(data++) = the_value;
+}
+
+template <class t_int_vec>
+typename std::enable_if<!t_int_vec::waste_bits, void>::type
+util::set_to_value(t_int_vec& v, uint64_t k)
 {
 	uint64_t* data = v.data();
 	if (v.empty()) return;
@@ -593,7 +624,41 @@ void util::set_to_value(t_int_vec& v, uint64_t k)
 }
 
 template <class t_int_vec, class t_int_vec_iterator>
-void util::set_to_value(t_int_vec& v, uint64_t k, t_int_vec_iterator it)
+typename std::enable_if<t_int_vec::waste_bits, void>::type
+util::set_to_value(t_int_vec& v, uint64_t k, t_int_vec_iterator it)
+{
+	typedef typename t_int_vec::size_type size_type;
+
+	if (v.empty()) return;
+	uint8_t int_width = v.width();
+	if (int_width == 0) {
+		throw std::logic_error("util::set_to_value can not be performed with int_width=0!");
+	}
+
+	uint64_t the_value{0};
+	k &= bits::lo_set[int_width];
+	for (uint8_t i = 0; i <= 64 - int_width; i += int_width)
+		the_value |= (k << i);
+
+	size_type words        = (v.bit_size() + 63) >> 6;
+	size_type word_pos     = (it - v.begin()) / v.elements_per_word;
+	uint8_t   pos_in_word  = ((it - v.begin()) - word_pos * v.elements_per_word) * int_width;
+
+	uint64_t* data = v.data() + word_pos;
+	*(data) &= bits::lo_set[pos_in_word]; // unset first bits
+	*(data) |= (bits::lo_unset[pos_in_word] & the_value); // set last bits
+	++word_pos;
+
+	while (word_pos < words)
+	{
+		*(++data) = the_value;
+		++word_pos;
+	}
+}
+
+template <class t_int_vec, class t_int_vec_iterator>
+typename std::enable_if<!t_int_vec::waste_bits, void>::type
+util::set_to_value(t_int_vec& v, uint64_t k, t_int_vec_iterator it)
 {
 	typedef typename t_int_vec::size_type size_type;
 

@@ -288,8 +288,8 @@ inline bool store_to_file(const char* v, const std::string& file)
 }
 
 //! Specialization of store_to_file for int_vector
-template <uint8_t t_width>
-bool store_to_file(const int_vector<t_width>& v, const std::string& file);
+template <uint8_t t_width, bool waste_bits>
+bool store_to_file(const int_vector<t_width, waste_bits>& v, const std::string& file);
 
 
 //! Store an int_vector as plain int_type array to disk
@@ -858,8 +858,8 @@ inline bool store_to_file(const std::string& v, const std::string& file)
 	return true;
 }
 
-template <uint8_t t_width>
-bool store_to_file(const int_vector<t_width>& v, const std::string& file)
+template <uint8_t t_width, bool waste_bits>
+bool store_to_file(const int_vector<t_width, waste_bits>& v, const std::string& file)
 {
 	osfstream out(file, std::ios::binary | std::ios::trunc | std::ios::out);
 	if (!out) {
@@ -876,8 +876,8 @@ bool store_to_file(const int_vector<t_width>& v, const std::string& file)
 	return true;
 }
 
-template <uint8_t t_width>
-bool store_to_checked_file(const int_vector<t_width>& v, const std::string& file)
+template <uint8_t t_width, bool waste_bits>
+bool store_to_checked_file(const int_vector<t_width, waste_bits>& v, const std::string& file)
 {
 	std::string checkfile = file + "_check";
 	osfstream   out(checkfile, std::ios::binary | std::ios::trunc | std::ios::out);

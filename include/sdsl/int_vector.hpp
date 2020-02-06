@@ -42,14 +42,16 @@ namespace sdsl {
 
 typedef uint64_t std_size_type_for_int_vector;
 
-template <uint8_t t_width = 0>
+template <uint8_t t_width = 0, bool waste_bits_ = false>
 class int_vector;
 
 template <class int_vector_type>
 class mm_item;
 
 //! bit_vector is a specialization of the int_vector.
-typedef int_vector<1> bit_vector;
+template <bool waste_bits_ = false>
+using bit_vector = int_vector<1, waste_bits_>;
+// typedef int_vector<1, waste_bits_> bit_vector<waste_bits_>;
 
 template <class t_int_vector>
 class int_vector_reference;
@@ -110,7 +112,7 @@ struct int_vector_trait {
 	static iterator begin(int_vector_type* v, uint64_t*) noexcept { return iterator(v, 0); }
 	static iterator end(int_vector_type* v, uint64_t*, int_vector_size_type) noexcept
 	{
-		return iterator(v, v->size() * v->width());
+		return iterator(v, v->size());
 	}
 	static const_iterator begin(const int_vector_type* v, const uint64_t*) noexcept
 	{
@@ -118,7 +120,7 @@ struct int_vector_trait {
 	}
 	static const_iterator end(const int_vector_type* v, const uint64_t*, int_vector_size_type) noexcept
 	{
-		return const_iterator(v, v->size() * v->width());
+		return const_iterator(v, v->size());
 	}
 
 	static void set_width(uint8_t new_width, int_width_type& width) noexcept
@@ -253,7 +255,7 @@ struct int_vector_trait<8> {
  *          during runtime, otherwise fixed at compile time.
  *  @ingroup int_vector
  */
-template <uint8_t t_width>
+template <uint8_t t_width, bool waste_bits_>
 class int_vector {
 private:
 	static_assert(t_width <= 64, "int_vector: width of must be at most 64bits.");
@@ -291,6 +293,7 @@ public:
 	friend class coder::comma;
 	friend class memory_manager;
 	static constexpr uint8_t fixed_int_width = t_width;
+	static constexpr bool waste_bits = waste_bits_;
 	float growth_factor = 1.5; //!< Growth factor for amortized constant time operations
 	// see the explanation in the documentation of FBVector on different growth factors
 	// https://github.com/facebook/folly/blob/master/folly/docs/FBVector.md#memory-handling
@@ -304,25 +307,29 @@ private:
 	// Hidden, since number of bits (size) does not go well together with int value.
 	void bit_resize(const size_type size, const value_type value);
 
-	void amortized_resize(const size_type size)
-	{
-		assert(growth_factor > 1.0);
-		size_type bit_size = size * m_width;
-		if (bit_size > m_capacity || m_data == nullptr) {
-			// start with 64 bit if vector has no capacity
-			size_type tmp_capacity = m_capacity == 0 ? 64 : m_capacity;
-			// find smallest x s.t. m_capacity * 1.5 ** x >= size
-			auto resize_factor = pow(growth_factor, std::ceil(std::log((bit_size + tmp_capacity - 1) / tmp_capacity) / std::log(growth_factor)));
-			size_type new_capacity = std::ceil(tmp_capacity * resize_factor);
-			memory_manager::resize(*this, new_capacity);
-		}
-		m_size = size * m_width;
-	}
+	template <bool T = waste_bits_>
+	typename std::enable_if<T, void>::type
+	amortized_resize(const size_type size);
+
+	template <bool T = waste_bits_>
+	typename std::enable_if<!T, void>::type
+	amortized_resize(const size_type size);
 
 	// The number of 64-bit words used by the int_vector.
 	size_type bit_data_size() const { return (m_size + 63) >> 6; }
 
 public:
+
+	uint32_t elements_per_word{0};
+
+	template <bool T = waste_bits_>
+	typename std::enable_if<T, std::pair<size_t, size_t>>::type
+	position_with_wastebits(size_t const pos) const
+	{
+		size_t const word_idx = pos / elements_per_word;
+		size_t const pos_in_word = pos - word_idx * elements_per_word;
+		return std::make_pair(word_idx, pos_in_word);
+	}
 	//! Constructor for int_vector.
 	/*! \param size          Number of elements. Default value is 0.
             \param default_value Initialize all value to `default value`.
@@ -414,6 +421,10 @@ public:
 		size_type pos = it - cbegin();
 		amortized_resize(size() + n);
 		iterator it_new = begin() + pos;
+
+		if (end() - n >= end())
+			return it_new;
+
 		std::copy_backward(it_new, end() - n, end());
 		std::fill_n(it_new, n, value);
 		return it_new;
@@ -507,7 +518,7 @@ public:
 	 */
 	void assign(std::initializer_list<value_type> il)
 	{
-		bit_resize(il.size() * m_width);
+		resize(il.size());
 		size_type idx = 0;
 		for (auto x : il) {
 			(*this)[idx++] = x;
@@ -522,7 +533,7 @@ public:
 	void assign(input_iterator_t first, input_iterator_t last)
 	{
 		assert(first <= last);
-		bit_resize((last - first) * m_width);
+		resize(last - first);
 		size_type idx = 0;
 		while (first < last) {
 			(*this)[idx++] = *(first++);
@@ -558,7 +569,13 @@ public:
 	/*! \param size The size to resize the int_vector in terms of elements.
         \param value If the current size is smaller than `size`, the additional elements are initialized with value.
 	 */
-	void resize(const size_type size, const value_type value) { bit_resize(size * m_width, value); }
+
+	template <bool T = waste_bits_>
+	typename std::enable_if<!T, void>::type
+	resize(const size_type size, const value_type value);
+	template <bool T = waste_bits_>
+	typename std::enable_if<T, void>::type
+	resize(const size_type size, const value_type value);
 
 	//! Resize the int_vector in terms of bits. Only as much space as necessary is allocated.
 	/*! \param size The size to resize the int_vector in terms of bits.
@@ -569,6 +586,10 @@ public:
 	/*! \sa max_size, bit_size, capacity, bit_capacity
          */
 	inline size_type size() const noexcept;
+	// template <bool T = waste_bits_>
+	// inline typename std::enable_if<!T, size_type>::type size() const noexcept;
+	template <bool T = waste_bits_>
+	inline typename std::enable_if<T, size_type>::type size() const noexcept;
 
 	//! Maximum size of the int_vector.
 	/*! \sa size, bit_size, capacity, bit_capacity
@@ -610,7 +631,11 @@ public:
             \returns The integer value of the binary string of length len starting at position idx.
             \sa setInt, getBit, setBit
         */
-	value_type get_int(size_type idx, const uint8_t len = 64) const;
+	// value_type get_int(size_type idx, const uint8_t len = 64) const;
+	template <bool T = waste_bits_>
+	inline typename std::enable_if<!T, value_type>::type get_int(size_type idx, const uint8_t len) const;
+	template <bool T = waste_bits_>
+	inline typename std::enable_if<T, value_type>::type get_int(size_type idx, const uint8_t len) const;
 
 	//! Set the bits from position idx to idx+len-1 to the binary representation of integer x.
 	/*! The bit at position idx represents the least significant bit(lsb), and the bit at
@@ -620,7 +645,10 @@ public:
             \param len The length used to store x in the int_vector. Default value is 64.
             \sa getInt, getBit, setBit
         */
-	void set_int(size_type idx, value_type x, const uint8_t len = 64);
+	template <bool T = waste_bits_>
+	inline typename std::enable_if<!T, void>::type set_int(size_type idx, value_type x, const uint8_t len = 64);
+	template <bool T = waste_bits_>
+	inline typename std::enable_if<T, void>::type set_int(size_type idx, value_type x, const uint8_t len = 64);
 
 	//! Returns the width of the integers which are accessed via the [] operator.
 	/*! \returns The width of the integers which are accessed via the [] operator.
@@ -633,7 +661,7 @@ public:
             \note This method has no effect if t_width is in the range [1..64].
               \sa width
         */
-	void width(uint8_t new_width) noexcept { int_vector_trait<t_width>::set_width(new_width, m_width); }
+	void width(uint8_t new_width) noexcept { int_vector_trait<t_width>::set_width(new_width, m_width); elements_per_word = 64 / m_width; }
 
 	// Write data (without header) to a stream.
 	size_type write_data(std::ostream& out) const;
@@ -655,22 +683,22 @@ public:
 
 	//!\brief Serialise (save) via cereal if archive is not binary
 	template <typename archive_t> inline
-	typename std::enable_if<!cereal::traits::is_output_serializable<cereal::BinaryData<int_vector<t_width>>, archive_t>::value, void>::type
+	typename std::enable_if<!cereal::traits::is_output_serializable<cereal::BinaryData<int_vector<t_width, waste_bits_>>, archive_t>::value, void>::type
 	CEREAL_SAVE_FUNCTION_NAME(archive_t & ar) const;
 
 	//!\brief Serialise (save) via cereal if archive is binary
 	template <typename archive_t> inline
-	typename std::enable_if<cereal::traits::is_output_serializable<cereal::BinaryData<int_vector<t_width>>, archive_t>::value, void>::type
+	typename std::enable_if<cereal::traits::is_output_serializable<cereal::BinaryData<int_vector<t_width, waste_bits_>>, archive_t>::value, void>::type
 	CEREAL_SAVE_FUNCTION_NAME(archive_t & ar) const;
 
 	//!\brief Serialise (load) via cereal if archive is not binary
 	template <typename archive_t> inline
-	typename std::enable_if<!cereal::traits::is_input_serializable<cereal::BinaryData<int_vector<t_width>>, archive_t>::value, void>::type
+	typename std::enable_if<!cereal::traits::is_input_serializable<cereal::BinaryData<int_vector<t_width, waste_bits_>>, archive_t>::value, void>::type
 	CEREAL_LOAD_FUNCTION_NAME(archive_t & ar);
 
 	//!\brief Serialise (save) via cereal if archive is binary
 	template <typename archive_t> inline
-	typename std::enable_if<cereal::traits::is_input_serializable<cereal::BinaryData<int_vector<t_width>>, archive_t>::value, void>::type
+	typename std::enable_if<cereal::traits::is_input_serializable<cereal::BinaryData<int_vector<t_width, waste_bits_>>, archive_t>::value, void>::type
 	CEREAL_LOAD_FUNCTION_NAME(archive_t & ar);
 
 	//! non const version of [] operator
@@ -716,8 +744,9 @@ public:
 		if (empty()) return true;
 		const uint64_t* data1 = v.data();
 		const uint64_t* data2 = data();
+		const uint8_t max_size = waste_bits_ ? 64 % m_width : 0;
 		for (size_type i = 0; i < bit_data_size() - 1; ++i) {
-			if (*(data1++) != *(data2++)) return false;
+			if ((*(data1++) ^ *(data2++)) & bits::lo_set[max_size]) return false;
 		}
 		uint8_t l = 64 - ((bit_data_size() << 6) - m_size);
 		return ((*data1) & bits::lo_set[l]) == ((*data2) & bits::lo_set[l]);
@@ -784,19 +813,19 @@ public:
 	//! Iterator that points to the element after the last element of int_vector.
 	/*! Time complexity guaranty is O(1).
          */
-	iterator end() noexcept { return int_vector_trait<t_width>::end(this, m_data, (m_size / m_width)); }
+	iterator end() noexcept { return int_vector_trait<t_width>::end(this, m_data, size()); }
 
 	//! Const iterator that points to the first element of the int_vector.
 	const_iterator begin() const noexcept { return int_vector_trait<t_width>::begin(this, m_data); }
 
 	//! Const iterator that points to the element after the last element of int_vector.
-	const_iterator end() const noexcept { return int_vector_trait<t_width>::end(this, m_data, (m_size / m_width)); }
+	const_iterator end() const noexcept { return int_vector_trait<t_width>::end(this, m_data, size()); }
 
 	//! Const iterator that points to the first element of the int_vector.
 	const_iterator cbegin() const noexcept { return int_vector_trait<t_width>::begin(this, m_data); }
 
 	//! Const iterator that points to the element after the last element of int_vector.
-	const_iterator cend() const noexcept { return int_vector_trait<t_width>::end(this, m_data, (m_size / m_width)); }
+	const_iterator cend() const noexcept { return int_vector_trait<t_width>::end(this, m_data, size()); }
 
 	//! Flip all bits of bit_vector
 	void flip()
@@ -840,7 +869,6 @@ public:
 		uint64_t width_and_size = (((uint64_t)int_width) << 56) | size;
 		return write_member(width_and_size, out);
 	}
-
 
 	struct raw_wrapper {
 		const int_vector& vec;
@@ -1048,7 +1076,7 @@ public:
 	int_vector_reference& operator=(int_vector_reference && x) noexcept { return *this = bool(x); };
 
 	//! Cast the reference to a bool
-	operator bool() const noexcept { return !!(*m_word & m_mask); }
+	operator bool() const noexcept { return (*m_word & m_mask); }
 
 	bool operator==(const int_vector_reference& x) const noexcept { return bool(*this) == bool(x); }
 
@@ -1056,8 +1084,8 @@ public:
 };
 
 // For C++11
-template <>
-inline void swap(int_vector_reference<bit_vector> x, int_vector_reference<bit_vector> y) noexcept
+template <bool waste_bits>
+inline void swap(int_vector_reference<bit_vector<waste_bits>> x, int_vector_reference<bit_vector<waste_bits>> y) noexcept
 {
 	// TODO: more efficient solution?
 	bool tmp = x;
@@ -1094,15 +1122,41 @@ public:
 	typedef uint64_t size_type;
 
 protected:
-	uint8_t m_offset;
-	uint8_t m_len;
+	const t_int_vector* m_v;
+	const typename t_int_vector::value_type* m_word;
+	uint8_t m_offset{0};
+	uint8_t m_len{0};
+	uint8_t max_size{64};
 
 public:
 	int_vector_iterator_base(uint8_t offset, uint8_t len) : m_offset(offset), m_len(len) {}
 
-	int_vector_iterator_base(const t_int_vector* v = nullptr, size_type idx = 0)
-		: m_offset(idx & 0x3F), m_len(v == nullptr ? 0 : v->m_width)
+	template <bool T = t_int_vector::waste_bits>
+	int_vector_iterator_base(const t_int_vector* v = nullptr, size_type idx = 0,
+		typename std::enable_if<!T>::type* = 0)
+		: m_word((v != nullptr) ? v->m_data + (idx >> 6) : nullptr),
+		  m_offset(idx & 0x3F),
+		  m_len(v == nullptr ? 0 : v->m_width)
 	{
+	}
+
+	template <bool T = t_int_vector::waste_bits>
+	int_vector_iterator_base(const t_int_vector* v = nullptr, size_type idx = 0,
+		typename std::enable_if<T>::type* = 0) :
+		m_v(v),
+		m_word(m_v == nullptr ? nullptr : m_v->m_data),
+		m_offset(idx & 0x3f),
+		m_len(m_v == nullptr ? 0 : m_v->m_width),
+		max_size(m_v == nullptr ? 64 : m_v->elements_per_word * m_len)
+	{
+		if (m_v != nullptr)
+		{
+			size_t word_idx, idx_in_word;
+			std::tie(word_idx, idx_in_word) = m_v->position_with_wastebits(idx);
+
+			m_word += word_idx;
+			m_offset = idx_in_word * m_len;
+		}
 	}
 };
 
@@ -1121,32 +1175,37 @@ public:
 private:
 	using int_vector_iterator_base<t_int_vector>::m_offset; // make m_offset easy usable
 	using int_vector_iterator_base<t_int_vector>::m_len;	// make m_len easy usable
-
-	typename t_int_vector::value_type* m_word;
+	using int_vector_iterator_base<t_int_vector>::max_size;	// make max_size easy usable
+	using int_vector_iterator_base<t_int_vector>::m_v;	    // make m_v easy usable
+	using int_vector_iterator_base<t_int_vector>::m_word;	// make m_word easy usable
 
 public:
 	int_vector_iterator(t_int_vector* v = nullptr, size_type idx = 0)
 		: int_vector_iterator_base<t_int_vector>(v, idx)
-		, m_word((v != nullptr) ? v->m_data + (idx >> 6) : nullptr)
-	{
-	}
+	{}
 
-
-	int_vector_iterator(const int_vector_iterator<t_int_vector>& it)
-		: int_vector_iterator_base<t_int_vector>(it), m_word(it.m_word)
-	{
-		m_offset = it.m_offset;
-		m_len	= it.m_len;
-	}
+	int_vector_iterator(const int_vector_iterator<t_int_vector>& it) = default;
 
 	reference operator*() const { return reference(m_word, m_offset, m_len); }
 
 	//! Prefix increment of the Iterator
-	iterator& operator++()
+	template <typename T = t_int_vector>
+	typename std::enable_if<!T::waste_bits, iterator&>::type operator++()
 	{
 		m_offset += m_len;
 		if (m_offset >= 64) {
 			m_offset &= 0x3F;
+			++m_word;
+		}
+		return *this;
+	}
+
+	template <typename T = t_int_vector>
+	typename std::enable_if<T::waste_bits, iterator&>::type operator++()
+	{
+		m_offset += m_len;
+		if (m_offset >= max_size) {
+			m_offset = 0;
 			++m_word;
 		}
 		return *this;
@@ -1161,13 +1220,26 @@ public:
 	}
 
 	//! Prefix decrement of the Iterator
-	iterator& operator--()
+	template <typename T = t_int_vector>
+	typename std::enable_if<!T::waste_bits, iterator&>::type operator--()
 	{
 		m_offset -= m_len;
 		if (m_offset >= 64) {
 			m_offset &= 0x3F;
 			--m_word;
 		}
+		return *this;
+	}
+
+	template <typename T = t_int_vector>
+	typename std::enable_if<T::waste_bits, iterator&>::type operator--()
+	{
+		if (m_offset < m_len)
+		{
+			m_offset = max_size;
+			--m_word;
+		}
+		m_offset -= m_len;
 		return *this;
 	}
 
@@ -1179,7 +1251,28 @@ public:
 		return it;
 	}
 
-	iterator& operator+=(difference_type i)
+	template <typename T = t_int_vector>
+	typename std::enable_if<T::waste_bits, iterator&>::type operator+=(difference_type i)
+	{
+		if (i < 0) return *this -= (-i);
+		size_t full_words, bits_left;
+		std::tie(full_words, bits_left) = m_v->position_with_wastebits(i);
+		bits_left *= m_len;
+		m_word += full_words;
+		if (m_offset + bits_left >= max_size)
+		{
+			m_offset = m_offset + bits_left - max_size;
+			++m_word;
+		}
+		else
+		{
+			m_offset += bits_left;
+		}
+		return *this;
+	}
+
+	template <typename T = t_int_vector>
+	typename std::enable_if<!T::waste_bits, iterator&>::type operator+=(difference_type i)
 	{
 		if (i < 0) return *this -= (-i);
 		difference_type t = i * m_len;
@@ -1191,7 +1284,28 @@ public:
 		return *this;
 	}
 
-	iterator& operator-=(difference_type i)
+	template <typename T = t_int_vector>
+	typename std::enable_if<T::waste_bits, iterator&>::type operator-=(difference_type i)
+	{
+		if (i < 0) return *this += (-i);
+		size_t full_words, bits_left;
+		std::tie(full_words, bits_left) = m_v->position_with_wastebits(i);
+		bits_left *= m_len;
+		m_word -= full_words;
+		if (m_offset < bits_left)
+		{
+			m_offset = max_size - bits_left + m_offset;
+			--m_word;
+		}
+		else
+		{
+			m_offset -= bits_left;
+		}
+		return *this;
+	}
+
+	template <typename T = t_int_vector>
+	typename std::enable_if<!T::waste_bits, iterator&>::type operator-=(difference_type i)
 	{
 		if (i < 0) return *this += (-i);
 		difference_type t = i * m_len;
@@ -1249,9 +1363,17 @@ public:
 	bool operator>=(const int_vector_iterator& it) const noexcept { return !(*this < it); }
 
 	bool operator<=(const int_vector_iterator& it) const noexcept { return !(*this > it); }
-	inline difference_type operator-(const int_vector_iterator& it) const noexcept
+
+	template <typename T = t_int_vector>
+	typename std::enable_if<!T::waste_bits, difference_type>::type inline operator-(const int_vector_iterator& it) const noexcept
 	{
 		return (((m_word - it.m_word) << 6) + m_offset - it.m_offset) / m_len;
+	}
+
+	template <typename T = t_int_vector>
+	typename std::enable_if<T::waste_bits, difference_type>::type inline operator-(const int_vector_iterator& it) const noexcept
+	{
+		return (((m_word - it.m_word) * max_size) + m_offset - it.m_offset) / m_len;
 	}
 };
 
@@ -1286,27 +1408,24 @@ public:
 private:
 	using int_vector_iterator_base<t_int_vector>::m_offset; // make m_offset easy usable
 	using int_vector_iterator_base<t_int_vector>::m_len;	// make m_len easy usable
-
-	const typename t_int_vector::value_type* m_word;
+	using int_vector_iterator_base<t_int_vector>::max_size;	// make max_size easy usable
+	using int_vector_iterator_base<t_int_vector>::m_v;	    // make m_v easy usable
+	using int_vector_iterator_base<t_int_vector>::m_word;	// make m_word easy usable
 
 public:
 	int_vector_const_iterator(const t_int_vector* v = nullptr, size_type idx = 0)
 		: int_vector_iterator_base<t_int_vector>(v, idx)
-		, m_word((v != nullptr) ? v->m_data + (idx >> 6) : nullptr)
-	{
-	}
+	{}
 
-	int_vector_const_iterator(const int_vector_const_iterator& it)
-		: int_vector_iterator_base<t_int_vector>(it), m_word(it.m_word)
+	int_vector_const_iterator(const int_vector_const_iterator<t_int_vector>& it) = default;
+
+	int_vector_const_iterator(const int_vector_iterator<t_int_vector>& it)
 	{
+		m_v = it.m_v;
+		m_word = it.m_word;
 		m_offset = it.m_offset;
 		m_len	= it.m_len;
-	}
-
-	int_vector_const_iterator(const int_vector_iterator<t_int_vector>& it) : m_word(it.m_word)
-	{
-		m_offset = it.m_offset;
-		m_len	= it.m_len;
+		max_size = it.max_size;
 	}
 
 	const_reference operator*() const
@@ -1319,11 +1438,23 @@ public:
 	}
 
 	//! Prefix increment of the Iterator
-	const_iterator& operator++()
+	template <typename T = t_int_vector>
+	typename std::enable_if<!T::waste_bits, const_iterator&>::type operator++()
 	{
 		m_offset += m_len;
 		if (m_offset >= 64) {
 			m_offset &= 0x3F;
+			++m_word;
+		}
+		return *this;
+	}
+
+	template <typename T = t_int_vector>
+	typename std::enable_if<T::waste_bits, const_iterator&>::type operator++()
+	{
+		m_offset += m_len;
+		if (m_offset >= max_size) {
+			m_offset = 0;
 			++m_word;
 		}
 		return *this;
@@ -1338,13 +1469,26 @@ public:
 	}
 
 	//! Prefix decrement of the Iterator
-	const_iterator& operator--()
+	template <typename T = t_int_vector>
+	typename std::enable_if<!T::waste_bits, const_iterator&>::type operator--()
 	{
 		m_offset -= m_len;
 		if (m_offset >= 64) {
 			m_offset &= 0x3F;
 			--m_word;
 		}
+		return *this;
+	}
+
+	template <typename T = t_int_vector>
+	typename std::enable_if<T::waste_bits, const_iterator&>::type operator--()
+	{
+		if (m_offset < m_len)
+		{
+			m_offset = max_size;
+			--m_word;
+		}
+		m_offset -= m_len;
 		return *this;
 	}
 
@@ -1356,19 +1500,61 @@ public:
 		return it;
 	}
 
-	const_iterator& operator+=(difference_type i)
+	template <typename T = t_int_vector>
+	typename std::enable_if<T::waste_bits, const_iterator&>::type operator+=(difference_type i)
+	{
+		if (i < 0) return *this -= (-i);
+		size_t full_words, bits_left;
+		std::tie(full_words, bits_left) = m_v->position_with_wastebits(i);
+		bits_left *= m_len;
+		m_word += full_words;
+		if (m_offset + bits_left >= max_size)
+		{
+			m_offset = m_offset + bits_left - max_size;
+			++m_word;
+		}
+		else
+		{
+			m_offset += bits_left;
+		}
+		return *this;
+	}
+
+	template <typename T = t_int_vector>
+	typename std::enable_if<!T::waste_bits, const_iterator&>::type operator+=(difference_type i)
 	{
 		if (i < 0) return *this -= (-i);
 		difference_type t = i * m_len;
 		m_word += (t >> 6);
-		if ((m_offset += (t & 0x3F)) & ~0x3F) { // if new offset >= 64
+		if ((m_offset += (t & 0x3F)) & ~0x3F) { // if new offset is >= 64
 			++m_word;							// add one to the word
 			m_offset &= 0x3F;					// offset = offset mod 64
 		}
 		return *this;
 	}
 
-	const_iterator& operator-=(difference_type i)
+	template <typename T = t_int_vector>
+	typename std::enable_if<T::waste_bits, const_iterator&>::type operator-=(difference_type i)
+	{
+		if (i < 0) return *this += (-i);
+		size_t full_words, bits_left;
+		std::tie(full_words, bits_left) = m_v->position_with_wastebits(i);
+		bits_left *= m_len;
+		m_word -= full_words;
+		if (m_offset < bits_left)
+		{
+			m_offset = max_size - bits_left + m_offset;
+			--m_word;
+		}
+		else
+		{
+			m_offset -= bits_left;
+		}
+		return *this;
+	}
+
+	template <typename T = t_int_vector>
+	typename std::enable_if<!T::waste_bits, const_iterator&>::type operator-=(difference_type i)
 	{
 		if (i < 0) return *this += (-i);
 		difference_type t = i * m_len;
@@ -1419,11 +1605,21 @@ public:
 };
 
 template <class t_int_vector>
-inline typename int_vector_const_iterator<t_int_vector>::difference_type
+inline typename std::enable_if<!t_int_vector::waste_bits, typename int_vector_const_iterator<t_int_vector>::difference_type>::type
 operator-(const int_vector_const_iterator<t_int_vector>& x,
 		  const int_vector_const_iterator<t_int_vector>& y)
 {
 	return (((x.m_word - y.m_word) << 6) + x.m_offset - y.m_offset) / x.m_len;
+}
+
+template <class t_int_vector>
+inline typename std::enable_if<t_int_vector::waste_bits, typename int_vector_const_iterator<t_int_vector>::difference_type>::type
+operator-(const int_vector_const_iterator<t_int_vector>& x,
+		  const int_vector_const_iterator<t_int_vector>& y)
+{
+	typename int_vector_const_iterator<t_int_vector>::difference_type full_words = x.m_word - y.m_word;
+	typename int_vector_const_iterator<t_int_vector>::difference_type bits_left  = x.m_offset - y.m_offset;
+	return (full_words * (x.max_size / x.m_len) + bits_left / x.m_len);
 }
 
 template <class t_int_vector>
@@ -1447,25 +1643,25 @@ operator<<(std::ostream& os, const t_bv& bv)
 
 // ==== int_vector implementation  ====
 
-template <uint8_t t_width>
-inline int_vector<t_width>::int_vector(size_type size, value_type default_value, uint8_t int_width)
+template <uint8_t t_width, bool waste_bits>
+inline int_vector<t_width, waste_bits>::int_vector(size_type size, value_type default_value, uint8_t int_width)
 	: m_size(0), m_capacity(0), m_data(nullptr), m_width(t_width)
 {
 	width(int_width);
 	assign(size, default_value);
 }
 
-template <uint8_t t_width>
-inline int_vector<t_width>::int_vector(int_vector&& v)
-	: m_size(v.m_size), m_capacity(v.m_capacity), m_data(v.m_data), m_width(v.m_width)
+template <uint8_t t_width, bool waste_bits>
+inline int_vector<t_width, waste_bits>::int_vector(int_vector&& v)
+	: m_size(v.m_size), m_capacity(v.m_capacity), m_data(v.m_data), m_width(v.m_width), elements_per_word(v.elements_per_word)
 {
 	v.m_data = nullptr; // ownership of v.m_data now transfered
 	v.m_size = 0;
 	v.m_capacity = 0;
 }
 
-template <uint8_t t_width>
-inline int_vector<t_width>::int_vector(const int_vector& v)
+template <uint8_t t_width, bool waste_bits>
+inline int_vector<t_width, waste_bits>::int_vector(const int_vector& v)
 	: m_size(0), m_capacity(0), m_data(nullptr), m_width(v.m_width)
 {
 	width(v.m_width);
@@ -1477,22 +1673,23 @@ inline int_vector<t_width>::int_vector(const int_vector& v)
 	}
 }
 
-template <uint8_t	t_width>
-int_vector<t_width>& int_vector<t_width>::operator=(const int_vector& v)
+template <uint8_t t_width, bool waste_bits>
+int_vector<t_width, waste_bits>& int_vector<t_width, waste_bits>::operator=(const int_vector& v)
 {
 	if (this != &v) { // if v is not the same object
-		int_vector<t_width> tmp(v);
+		int_vector<t_width, waste_bits> tmp(v);
 		*this = std::move(tmp);
 	}
 	return *this;
 }
 
-template <uint8_t	t_width>
-int_vector<t_width>& int_vector<t_width>::operator=(int_vector&& v)
+template <uint8_t t_width, bool waste_bits>
+int_vector<t_width, waste_bits>& int_vector<t_width, waste_bits>::operator=(int_vector&& v)
 {
 	if (this != &v) { // if v is not the same object
 		memory_manager::clear(*this); // clear allocated memory
 		m_size     = v.m_size;
+		elements_per_word     = v.elements_per_word;
 		m_data     = v.m_data; // assign new memory
 		m_width    = v.m_width;
 		m_capacity = v.m_capacity;
@@ -1504,18 +1701,18 @@ int_vector<t_width>& int_vector<t_width>::operator=(int_vector&& v)
 }
 
 // Destructor
-template <uint8_t t_width>
-int_vector<t_width>::~int_vector()
+template <uint8_t t_width, bool waste_bits>
+int_vector<t_width, waste_bits>::~int_vector()
 {
 	memory_manager::clear(*this);
 }
 
 // sdsl::swap (to fulfill the container concept)
-template <uint8_t t_width>
-void swap(int_vector<t_width>& v1, int_vector<t_width>& v2) noexcept { std::swap(v1, v2); }
+template <uint8_t t_width, bool waste_bits>
+void swap(int_vector<t_width, waste_bits>& v1, int_vector<t_width, waste_bits>& v2) noexcept { std::swap(v1, v2); }
 
-template <uint8_t t_width>
-void int_vector<t_width>::bit_resize(const size_type size)
+template <uint8_t t_width, bool waste_bits>
+void int_vector<t_width, waste_bits>::bit_resize(const size_type size)
 {
 	if (size > m_capacity || m_data == nullptr) {
 		memory_manager::resize(*this, size);
@@ -1523,17 +1720,18 @@ void int_vector<t_width>::bit_resize(const size_type size)
 	m_size = size;
 }
 
-template <uint8_t t_width>
-void int_vector<t_width>::bit_resize(const size_type size, const value_type value)
+template <uint8_t t_width, bool waste_bits>
+void int_vector<t_width, waste_bits>::bit_resize(const size_type size, const value_type value)
 {
-	size_type old_size = m_size;
+	size_type old_size = this->size();
 	bit_resize(size);
-	auto it = begin() + old_size / m_width;
+	auto it = begin() + old_size;
 	util::set_to_value(*this, value, it);
 }
 
-template <uint8_t t_width>
-auto int_vector<t_width>::get_int(size_type idx, const uint8_t len) const -> value_type
+template <uint8_t t_width, bool waste_bits>
+template <bool T>
+inline typename std::enable_if<!T, typename int_vector<t_width, waste_bits>::value_type>::type int_vector<t_width, waste_bits>::get_int(size_type idx, const uint8_t len) const
 {
 #ifdef SDSL_DEBUG
 	if (idx + len > m_size) {
@@ -1548,8 +1746,28 @@ auto int_vector<t_width>::get_int(size_type idx, const uint8_t len) const -> val
 	return bits::read_int(m_data + (idx >> 6), idx & 0x3F, len);
 }
 
-template <uint8_t t_width>
-inline void int_vector<t_width>::set_int(size_type idx, value_type x, const uint8_t len)
+template <uint8_t t_width, bool waste_bits>
+template <bool T>
+inline typename std::enable_if<T, typename int_vector<t_width, waste_bits>::value_type>::type int_vector<t_width, waste_bits>::get_int(size_type idx, const uint8_t len) const
+{
+#ifdef SDSL_DEBUG
+	if (idx + len > m_size) {
+		throw std::out_of_range(
+		"OUT_OF_RANGE_ERROR: int_vector::get_int(size_type, uint8_t); idx+len > size()!");
+	}
+	if (len > 64) {
+		throw std::out_of_range(
+		"OUT_OF_RANGE_ERROR: int_vector::get_int(size_type, uint8_t); len>64!");
+	}
+#endif
+	size_t word_idx, idx_in_word;
+	std::tie(word_idx, idx_in_word) = position_with_wastebits(idx);
+	return bits::read_int(m_data + word_idx, idx_in_word * m_width, len);
+}
+
+template <uint8_t t_width, bool waste_bits>
+template <bool T>
+inline typename std::enable_if<!T, void>::type int_vector<t_width, waste_bits>::set_int(size_type idx, value_type x, const uint8_t len)
 {
 #ifdef SDSL_DEBUG
 	if (idx + len > m_size) {
@@ -1564,9 +1782,43 @@ inline void int_vector<t_width>::set_int(size_type idx, value_type x, const uint
 	bits::write_int(m_data + (idx >> 6), x, idx & 0x3F, len);
 }
 
-template <uint8_t t_width>
-inline typename int_vector<t_width>::size_type int_vector<t_width>::size() const noexcept {
-    return m_size / m_width;
+template <uint8_t t_width, bool waste_bits>
+template <bool T>
+inline typename std::enable_if<T, void>::type int_vector<t_width, waste_bits>::set_int(size_type idx, value_type x, const uint8_t len)
+{
+#ifdef SDSL_DEBUG
+	if (idx + len > m_size) {
+		throw std::out_of_range(
+		"OUT_OF_RANGE_ERROR: int_vector::set_int(size_type, uint8_t); idx+len > size()!");
+	}
+	if (len > 64) {
+		throw std::out_of_range(
+		"OUT_OF_RANGE_ERROR: int_vector::set_int(size_type, uint8_t); len>64!");
+	}
+#endif
+	size_t word_idx, idx_in_word;
+	std::tie(word_idx, idx_in_word) = position_with_wastebits(idx);
+	bits::write_int(m_data + word_idx, x, idx_in_word, len);
+}
+
+// template <uint8_t t_width, bool waste_bits>
+// template <bool T>
+// inline typename std::enable_if<!T, typename int_vector<t_width, waste_bits>::size_type>::type int_vector<t_width, waste_bits>::size() const noexcept {
+//     return m_size / m_width;
+// }
+
+template <uint8_t t_width, bool waste_bits>
+inline typename int_vector<t_width, waste_bits>::size_type int_vector<t_width, waste_bits>::size() const noexcept
+{
+	return m_size / m_width;
+}
+
+template <uint8_t t_width, bool waste_bits>
+template <bool T>
+inline typename std::enable_if<T, typename int_vector<t_width, waste_bits>::size_type>::type int_vector<t_width, waste_bits>::size() const noexcept {
+	size_t full_words = m_size / 64;
+	size_t elem_left  = m_size - (full_words * 64);
+	return full_words * elements_per_word + elem_left / m_width;
 }
 
 // specialized size method for 64-bit integer vector
@@ -1601,8 +1853,8 @@ inline typename int_vector<1>::size_type int_vector<1>::size() const noexcept {
 
 
 
-template <uint8_t t_width>
-inline typename int_vector<t_width>::size_type int_vector<t_width>::capacity() const noexcept {
+template <uint8_t t_width, bool waste_bits>
+inline typename int_vector<t_width, waste_bits>::size_type int_vector<t_width, waste_bits>::capacity() const noexcept {
     return m_capacity / m_width;
 }
 
@@ -1636,8 +1888,8 @@ inline typename int_vector<1>::size_type int_vector<1>::capacity() const noexcep
     return m_capacity;
 }
 
-template <uint8_t t_width>
-inline auto int_vector<t_width>::operator[](const size_type& idx) noexcept -> reference
+template <uint8_t t_width, bool waste_bits>
+inline auto int_vector<t_width, waste_bits>::operator[](const size_type& idx) noexcept -> reference
 {
 	assert(idx < this->size());
 	size_type i = idx * m_width;
@@ -1676,8 +1928,8 @@ inline auto int_vector<8>::operator[](const size_type& idx) noexcept -> referenc
 	return *(((uint8_t*)(this->m_data)) + idx);
 }
 
-template <uint8_t t_width>
-inline auto int_vector<t_width>::operator[](const size_type& idx) const noexcept -> const_reference
+template <uint8_t t_width, bool waste_bits>
+inline auto int_vector<t_width, waste_bits>::operator[](const size_type& idx) const noexcept -> const_reference
 {
 	assert(idx < this->size());
 	return get_int(idx * t_width, t_width);
@@ -1725,8 +1977,8 @@ inline auto int_vector<1>::operator[](const size_type& idx) const noexcept -> co
 	return ((*(m_data + (idx >> 6))) >> (idx & 0x3F)) & 1;
 }
 
-template <uint8_t t_width>
-bool int_vector<t_width>::operator<(const int_vector& v) const noexcept
+template <uint8_t t_width, bool waste_bits>
+bool int_vector<t_width, waste_bits>::operator<(const int_vector& v) const noexcept
 {
 	size_type min_size				  = size();
 	if (min_size > v.size()) min_size = v.size();
@@ -1739,8 +1991,8 @@ bool int_vector<t_width>::operator<(const int_vector& v) const noexcept
 	return size() < v.size();
 }
 
-template <uint8_t t_width>
-bool int_vector<t_width>::operator>(const int_vector& v) const noexcept
+template <uint8_t t_width, bool waste_bits>
+bool int_vector<t_width, waste_bits>::operator>(const int_vector& v) const noexcept
 {
 	size_type min_size				  = size();
 	if (min_size > v.size()) min_size = v.size();
@@ -1753,20 +2005,20 @@ bool int_vector<t_width>::operator>(const int_vector& v) const noexcept
 	return size() > v.size();
 }
 
-template <uint8_t t_width>
-bool int_vector<t_width>::operator<=(const int_vector& v) const noexcept
+template <uint8_t t_width, bool waste_bits>
+bool int_vector<t_width, waste_bits>::operator<=(const int_vector& v) const noexcept
 {
 	return *this == v or *this < v;
 }
 
-template <uint8_t t_width>
-bool int_vector<t_width>::operator>=(const int_vector& v) const noexcept
+template <uint8_t t_width, bool waste_bits>
+bool int_vector<t_width, waste_bits>::operator>=(const int_vector& v) const noexcept
 {
 	return *this == v or *this > v;
 }
 
-template <uint8_t	t_width>
-int_vector<t_width>& int_vector<t_width>::operator&=(const int_vector& v)
+template <uint8_t t_width, bool waste_bits>
+int_vector<t_width, waste_bits>& int_vector<t_width, waste_bits>::operator&=(const int_vector& v)
 {
 	assert(v.bit_size() == bit_size());
 	for (uint64_t i = 0; i < bit_data_size(); ++i)
@@ -1774,8 +2026,8 @@ int_vector<t_width>& int_vector<t_width>::operator&=(const int_vector& v)
 	return *this;
 }
 
-template <uint8_t	t_width>
-int_vector<t_width>& int_vector<t_width>::operator|=(const int_vector& v)
+template <uint8_t t_width, bool waste_bits>
+int_vector<t_width, waste_bits>& int_vector<t_width, waste_bits>::operator|=(const int_vector& v)
 {
 	assert(bit_size() == v.bit_size());
 	for (uint64_t i = 0; i < bit_data_size(); ++i)
@@ -1783,8 +2035,8 @@ int_vector<t_width>& int_vector<t_width>::operator|=(const int_vector& v)
 	return *this;
 }
 
-template <uint8_t	t_width>
-int_vector<t_width>& int_vector<t_width>::operator^=(const int_vector& v)
+template <uint8_t t_width, bool waste_bits>
+int_vector<t_width, waste_bits>& int_vector<t_width, waste_bits>::operator^=(const int_vector& v)
 {
 	assert(bit_size() == v.bit_size());
 	for (uint64_t i = 0; i < bit_data_size(); ++i)
@@ -1792,8 +2044,8 @@ int_vector<t_width>& int_vector<t_width>::operator^=(const int_vector& v)
 	return *this;
 }
 
-template <uint8_t						t_width>
-typename int_vector<t_width>::size_type int_vector<t_width>::write_data(std::ostream& out) const
+template <uint8_t t_width, bool waste_bits>
+typename int_vector<t_width, waste_bits>::size_type int_vector<t_width, waste_bits>::write_data(std::ostream& out) const
 {
 	size_type written_bytes = 0;
 	uint64_t* p				= m_data;
@@ -1809,22 +2061,22 @@ typename int_vector<t_width>::size_type int_vector<t_width>::write_data(std::ost
 	return written_bytes;
 }
 
-template <uint8_t t_width>
-typename int_vector<t_width>::size_type
-int_vector<t_width>::serialize(std::ostream& out, structure_tree_node* v, std::string name) const
+template <uint8_t t_width, bool waste_bits>
+typename int_vector<t_width, waste_bits>::size_type
+int_vector<t_width, waste_bits>::serialize(std::ostream& out, structure_tree_node* v, std::string name) const
 {
 	structure_tree_node* child = structure_tree::add_child(v, name, util::class_name(*this));
-	size_type			 written_bytes = int_vector<t_width>::write_header(m_size, m_width, out);
+	size_type			 written_bytes = int_vector<t_width, waste_bits>::write_header(m_size, m_width, out);
 	written_bytes += write_data(out);
 	structure_tree::add_size(child, written_bytes);
 	return written_bytes;
 }
 
-template <uint8_t t_width>
-void int_vector<t_width>::load(std::istream& in)
+template <uint8_t t_width, bool waste_bits>
+void int_vector<t_width, waste_bits>::load(std::istream& in)
 {
 	size_type size;
-	int_vector<t_width>::read_header(size, m_width, in);
+	int_vector<t_width, waste_bits>::read_header(size, m_width, in);
 
 	bit_resize(size);
 	uint64_t* p   = m_data;
@@ -1837,10 +2089,10 @@ void int_vector<t_width>::load(std::istream& in)
 	in.read((char*)p, (bit_data_size() - idx) * sizeof(uint64_t));
 }
 
-template <uint8_t t_width>
+template <uint8_t t_width, bool waste_bits>
 template <typename archive_t> inline
-typename std::enable_if<cereal::traits::is_output_serializable<cereal::BinaryData<int_vector<t_width>>, archive_t>::value, void>::type
-int_vector<t_width>::CEREAL_SAVE_FUNCTION_NAME(archive_t & ar) const
+typename std::enable_if<cereal::traits::is_output_serializable<cereal::BinaryData<int_vector<t_width, waste_bits>>, archive_t>::value, void>::type
+int_vector<t_width, waste_bits>::CEREAL_SAVE_FUNCTION_NAME(archive_t & ar) const
 {
 	ar(CEREAL_NVP(cereal::make_size_tag(static_cast<int_width_type>(m_width))));
 	ar(CEREAL_NVP(growth_factor));
@@ -1848,10 +2100,10 @@ int_vector<t_width>::CEREAL_SAVE_FUNCTION_NAME(archive_t & ar) const
 	ar(cereal::make_nvp("data", cereal::binary_data(m_data, bit_data_size() * sizeof(uint64_t))));
 }
 
-template <uint8_t t_width>
+template <uint8_t t_width, bool waste_bits>
 template <typename archive_t> inline
-typename std::enable_if<!cereal::traits::is_output_serializable<cereal::BinaryData<int_vector<t_width>>, archive_t>::value, void>::type
-int_vector<t_width>::CEREAL_SAVE_FUNCTION_NAME(archive_t & ar) const
+typename std::enable_if<!cereal::traits::is_output_serializable<cereal::BinaryData<int_vector<t_width, waste_bits>>, archive_t>::value, void>::type
+int_vector<t_width, waste_bits>::CEREAL_SAVE_FUNCTION_NAME(archive_t & ar) const
 {
 	ar(CEREAL_NVP(m_width));
 	ar(CEREAL_NVP(growth_factor));
@@ -1860,10 +2112,10 @@ int_vector<t_width>::CEREAL_SAVE_FUNCTION_NAME(archive_t & ar) const
 		ar(v);
 }
 
-template <uint8_t t_width>
+template <uint8_t t_width, bool waste_bits>
 template <typename archive_t> inline
-typename std::enable_if<cereal::traits::is_input_serializable<cereal::BinaryData<int_vector<t_width>>, archive_t>::value, void>::type
-int_vector<t_width>::CEREAL_LOAD_FUNCTION_NAME(archive_t & ar)
+typename std::enable_if<cereal::traits::is_input_serializable<cereal::BinaryData<int_vector<t_width, waste_bits>>, archive_t>::value, void>::type
+int_vector<t_width, waste_bits>::CEREAL_LOAD_FUNCTION_NAME(archive_t & ar)
 {
 	ar(CEREAL_NVP(cereal::make_size_tag(m_width)));
 	ar(CEREAL_NVP(growth_factor));
@@ -1872,10 +2124,10 @@ int_vector<t_width>::CEREAL_LOAD_FUNCTION_NAME(archive_t & ar)
 	ar(cereal::make_nvp("data", cereal::binary_data(m_data, bit_data_size() * sizeof(uint64_t))));
 }
 
-template <uint8_t t_width>
+template <uint8_t t_width, bool waste_bits>
 template <typename archive_t> inline
-typename std::enable_if<!cereal::traits::is_input_serializable<cereal::BinaryData<int_vector<t_width>>, archive_t>::value, void>::type
-int_vector<t_width>::CEREAL_LOAD_FUNCTION_NAME(archive_t & ar)
+typename std::enable_if<!cereal::traits::is_input_serializable<cereal::BinaryData<int_vector<t_width, waste_bits>>, archive_t>::value, void>::type
+int_vector<t_width, waste_bits>::CEREAL_LOAD_FUNCTION_NAME(archive_t & ar)
 {
 	ar(CEREAL_NVP(m_width));
 	width(width());
@@ -1889,6 +2141,61 @@ int_vector<t_width>::CEREAL_LOAD_FUNCTION_NAME(archive_t & ar)
 		ar(tmp);
 		operator[](i) = tmp;
 	}
+}
+
+template <uint8_t t_width, bool waste_bits>
+template <bool T>
+typename std::enable_if<!T, void>::type
+int_vector<t_width, waste_bits>::amortized_resize(const size_type size)
+{
+	assert(growth_factor > 1.0);
+	size_type bit_size = size * m_width;
+	if (bit_size > m_capacity || m_data == nullptr) {
+		// start with 64 bit if vector has no capacity
+		size_type tmp_capacity = m_capacity == 0 ? 64 : m_capacity;
+		// find smallest x s.t. m_capacity * 1.5 ** x >= size
+		auto resize_factor = pow(growth_factor, std::ceil(std::log((bit_size + tmp_capacity - 1) / tmp_capacity) / std::log(growth_factor)));
+		size_type new_capacity = std::ceil(tmp_capacity * resize_factor);
+		memory_manager::resize(*this, new_capacity);
+	}
+	m_size = size * m_width;
+}
+
+template <uint8_t t_width, bool waste_bits>
+template <bool T>
+typename std::enable_if<T, void>::type
+int_vector<t_width, waste_bits>::amortized_resize(const size_type size)
+{
+	assert(growth_factor > 1.0);
+	size_t full_words, elem_left;
+	std::tie(full_words, elem_left) = position_with_wastebits(size);
+	m_size = full_words * 64 + elem_left * m_width;
+	if (m_size > m_capacity || m_data == nullptr) {
+		// start with 64 bit if vector has no capacity
+		size_type tmp_capacity = m_capacity == 0 ? 64 : m_capacity;
+		// find smallest x s.t. m_capacity * 1.5 ** x >= size
+		auto resize_factor = pow(growth_factor, std::ceil(std::log((m_size + tmp_capacity - 1) / tmp_capacity) / std::log(growth_factor)));
+		size_type new_capacity = std::ceil(tmp_capacity * resize_factor);
+		memory_manager::resize(*this, new_capacity);
+	}
+}
+
+template <uint8_t t_width, bool waste_bits>
+template <bool T>
+typename std::enable_if<!T, void>::type
+int_vector<t_width, waste_bits>::resize(const size_type size, const value_type value)
+{
+	bit_resize(size * m_width, value);
+}
+
+template <uint8_t t_width, bool waste_bits>
+template <bool T>
+typename std::enable_if<T, void>::type
+int_vector<t_width, waste_bits>::resize(const size_type size, const value_type value)
+{
+	size_t full_words, elem_left;
+	std::tie(full_words, elem_left) = position_with_wastebits(size);
+	bit_resize(full_words * 64 + elem_left * m_width, value);
 }
 
 } // end namespace sdsl
