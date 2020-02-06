@@ -325,12 +325,15 @@ void test_AssignAndResize(uint64_t size, uint8_t width)
     }
     {
         // assign(first, last)
-        t_iv iv(size, 0, width), iv2(size, 0, width);
-        sdsl::util::set_to_id(iv);
-        iv2.assign(iv.begin() + size/4, iv.end() - size/4); // copy some infix
-        ASSERT_EQ(iv2.size(), size - 2*(size/4));
-        for (auto it = iv2.begin(); it != iv2.end(); ++it)
+        if (size < 1000)
+        {
+            t_iv iv(size, 0, width), iv2(size, 0, width);
+            sdsl::util::set_to_id(iv);
+            iv2.assign(iv.begin() + size/4, iv.end() - size/4); // copy some infix
+            ASSERT_EQ(iv2.size(), size - 2*(size/4));
+            for (auto it = iv2.begin(); it != iv2.end(); ++it)
             ASSERT_EQ(*it, iv[it - iv2.begin() + size/4]);
+        }
     }
     {
         // resize(size)

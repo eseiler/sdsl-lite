@@ -591,16 +591,14 @@ void util::set_to_value(t_int_vec& v, uint64_t k)
 		_set_one_bits(v);
 		return;
 	}
-	uint8_t n;
-	uint64_t vec[65];
-	util::cyclic_shifts(vec, n, k, int_width);
 
-	typename t_int_vec::size_type n64 = (v.bit_size() + 63) >> 6;
-	for (typename t_int_vec::size_type i = 0; i < n64;) {
-		for (uint64_t ii = 0; ii < n and i < n64; ++ii, ++i) {
-			*(data++) = vec[ii];
-		}
-	}
+	uint64_t the_value{0};
+	k &= bits::lo_set[int_width];
+	for (uint8_t i = 0; i <= 64 - int_width; i += int_width)
+		the_value |= (k << i);
+
+	for (size_t i = 0; i < (v.bit_size() + 63) >> 6; ++i)
+		*(data++) = the_value;
 }
 
 template <class t_int_vec, class t_int_vec_iterator>
@@ -613,25 +611,25 @@ void util::set_to_value(t_int_vec& v, uint64_t k, t_int_vec_iterator it)
 	if (int_width == 0) {
 		throw std::logic_error("util::set_to_value can not be performed with int_width=0!");
 	}
-	uint8_t n;
-	uint64_t vec[65];
-	util::cyclic_shifts(vec, n, k, int_width);
+
+	uint64_t the_value{0};
+	k &= bits::lo_set[int_width];
+	for (uint8_t i = 0; i <= 64 - int_width; i += int_width)
+		the_value |= (k << i);
 
 	size_type words        = (v.bit_size() + 63) >> 6;
-	size_type word_pos     = ((it - v.begin()) * int_width) >> 6;
-	uint8_t   pos_in_word  = ((it - v.begin()) * int_width) - (word_pos << 6); // ((it - v.begin()) * int_width) % 64
-	uint8_t   cyclic_shift = word_pos % n;
+	size_type word_pos     = (it - v.begin()) / v.elements_per_word;
+	uint8_t   pos_in_word  = ((it - v.begin()) - word_pos * v.elements_per_word) * int_width;
 
 	uint64_t* data = v.data() + word_pos;
 	*(data) &= bits::lo_set[pos_in_word]; // unset first bits
-	*(data) |= bits::lo_unset[pos_in_word] & vec[cyclic_shift++]; // set last bits
+	*(data) |= (bits::lo_unset[pos_in_word] & the_value); // set last bits
 	++word_pos;
 
-	while (word_pos < words) {
-		for (; cyclic_shift < n && word_pos < words; ++cyclic_shift, ++word_pos) {
-			*(++data) = vec[cyclic_shift];
-		}
-		cyclic_shift = 0;
+	while (word_pos < words)
+	{
+		*(++data) = the_value;
+		++word_pos;
 	}
 }
 
