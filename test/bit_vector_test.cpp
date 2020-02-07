@@ -50,7 +50,7 @@ typedef Types<
 #else
 
 typedef Types<
-	bit_vector,
+	int_vector<1, false>,
 	bit_vector_il<>,
 	rrr_vector<>,
 	sd_vector<>,

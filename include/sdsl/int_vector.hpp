@@ -49,8 +49,7 @@ template <class int_vector_type>
 class mm_item;
 
 //! bit_vector is a specialization of the int_vector.
-template <bool waste_bits_ = false>
-using bit_vector = int_vector<1, waste_bits_>;
+using bit_vector = int_vector<1, false>;
 // typedef int_vector<1, waste_bits_> bit_vector<waste_bits_>;
 
 template <class t_int_vector>
@@ -1084,8 +1083,8 @@ public:
 };
 
 // For C++11
-template <bool waste_bits>
-inline void swap(int_vector_reference<bit_vector<waste_bits>> x, int_vector_reference<bit_vector<waste_bits>> y) noexcept
+template <>
+inline void swap(int_vector_reference<bit_vector> x, int_vector_reference<bit_vector> y) noexcept
 {
 	// TODO: more efficient solution?
 	bool tmp = x;
