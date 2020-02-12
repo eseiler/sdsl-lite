@@ -106,10 +106,10 @@ TYPED_TEST(wt_byte_epr_test, rank)
     ASSERT_EQ(text.size(), wt.size());
 
     // Test rank(i, c) for each character c and position i
-    unsigned cnt_prefix_rank[4] = {0};
-    for (unsigned i = 0; i < text.size() + 1; ++i)
+    size_t cnt_prefix_rank[4] = {0};
+    for (size_t i = 0; i < text.size() + 1; ++i)
     {
-        for (unsigned v = 0; v < wt.sigma; ++v)
+        for (size_t v = 0; v < wt.sigma; ++v)
         {
             if (i > 0 && text[i - 1] <= v)
                 ++cnt_prefix_rank[v];

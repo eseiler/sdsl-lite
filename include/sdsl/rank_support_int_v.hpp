@@ -40,7 +40,7 @@ private:
 	int_vector<0> m_block;
 	int_vector<64> m_superblock; // TODO: set width (at runtime). benchmark space consumption and running time
 
-	static constexpr uint64_t values_per_word{static_cast<uint64_t>(64) / rank_support_int<alphabet_size>::t_b};
+	static constexpr uint64_t values_per_word{64ULL / rank_support_int<alphabet_size>::t_b};
 	static constexpr uint32_t values_per_block{words_per_block * values_per_word};
 
 public:
