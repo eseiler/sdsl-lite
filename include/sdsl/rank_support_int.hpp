@@ -16,6 +16,8 @@
 #include "int_vector.hpp"
 #include "uint128_t.hpp"
 
+#include <bitset>
+
 // TODO: benchmark the use of compiler hints for branch prediction
 #define likely(x)       __builtin_expect((x),1)
 #define unlikely(x)     __builtin_expect((x),0)
@@ -58,18 +60,20 @@ protected:
 
 protected:
 	const int_vector<>* m_v; //!< Pointer to the rank supported bit_vector
-    static constexpr uint8_t t_v{alphabet_size};
-    static constexpr uint8_t t_b{ceil_log2(alphabet_size)};
-    // static constexpr uint8_t t_b{alphabet_size};
-	static constexpr uint64_t even_mask{bm_rec<uint64_t>(bits::lo_set[t_b], t_b * 2, 64)};
-	static constexpr uint64_t carry_select_mask{bm_rec<uint64_t>(1ULL << t_b, t_b * 2, 64)};
+    static constexpr uint8_t sigma{alphabet_size};
+    // static constexpr uint8_t values_per_word{64/sigma};
+    static constexpr uint8_t sigma_bits{ceil_log2(alphabet_size)};
+    static constexpr uint8_t bits_per_word{(64 / sigma_bits) * sigma_bits};
+    // static constexpr uint8_t sigma_bits{alphabet_size};
+	static constexpr uint64_t even_mask{bm_rec<uint64_t>(bits::lo_set[sigma_bits], sigma_bits * 2, 64)};
+	static constexpr uint64_t carry_select_mask{bm_rec<uint64_t>(1ULL << sigma_bits, sigma_bits * 2, 64)};
 	uint64_t masks[alphabet_size]; // TODO: make constexpr and remove init()
 
     // Count how often value v or smaller occurs in the word w.
     uint64_t set_positions_prefix(const uint64_t w, const value_type v) const
     {
         uint64_t const w_even = even_mask & w; // retrieve even positions
-        uint64_t const w_odd = even_mask & (w >> t_b); // retrieve odd positions
+        uint64_t const w_odd = even_mask & (w >> sigma_bits); // retrieve odd positions
         // every bit that will be set corresponds to an element <= v
         // because the preset bit to the left in the precomputed bitmask is not eliminated by the carry bit during the subtraction
         uint64_t res = (masks[v] - w_even) & carry_select_mask;
@@ -86,7 +90,7 @@ protected:
         assert(v > 0);
         // optimiyed version of set_positions(w, v) - set_positions(w, v - 1)
         uint64_t const w_even = even_mask & w; // retrieve even positions
-        uint64_t const w_odd = even_mask & (w >> t_b); // retrieve odd positions
+        uint64_t const w_odd = even_mask & (w >> sigma_bits); // retrieve odd positions
         uint64_t res = ((masks[v] - w_even) & ~(masks[v - 1] - w_even)) & carry_select_mask;
         res |= (((masks[v] - w_odd) & ~(masks[v - 1] - w_odd)) & carry_select_mask) << 1;
         return res;
@@ -95,16 +99,19 @@ protected:
     // Counts the occurrences of elements smaller or equal to v in the word starting at data up to position idx.
     uint32_t word_prefix_rank(const uint64_t* data, const size_type idx, const value_type v) const
     {
-        size_type const bit_pos = idx * t_b;
-        uint64_t const w = *(data + (bit_pos >> 6));
-        return bits::cnt(set_positions_prefix(w, v) & bits::lo_set[(bit_pos & 0x3F) + 1]);
+        size_type const bit_pos = idx * sigma_bits;
+        uint64_t const w = *(data + (bit_pos / bits_per_word));
+        // std::cout << "bit_pos=" << bit_pos << '\n';
+        // std::cout << "w= " << std::bitset<64>(w).to_string() << " v=" << std::bitset<64>(v).to_string() << " set_positions_prefix=" << std::bitset<64>(set_positions_prefix(w, v)).to_string() <<
+        //              " bits::lo_set=" << std::bitset<64>(bits::lo_set[(bit_pos % 63)]).to_string() << '\n';
+        return bits::cnt(set_positions_prefix(w, v) & bits::lo_set[(bit_pos % bits_per_word) + 1] ); //bits::lo_set[(bit_pos & 0x3F) + 1 + bit_pos/63]
     }
 
     // Counts the occurrences of elements smaller or equal to v in the word starting at data up to position idx.
     // Cannot be called on v = 0. Call word_prefix_rank(data, idx, 0) instead.
     uint32_t word_rank(const uint64_t* data, const size_type idx, const value_type v) const
     {
-        size_type const bit_pos = idx * t_b;
+        size_type const bit_pos = idx * sigma_bits;
         uint64_t const w = *(data + (bit_pos >> 6));
         return bits::cnt(set_positions(w, v) & bits::lo_set[(bit_pos & 0x3F) + 1]);
     }
@@ -128,19 +135,19 @@ protected:
     void init(const int_vector<>* v)
     {
         if (v != nullptr) {
-            assert(t_b == v->width()); // TODO Not valid because EPR uses effective sigma, the text uses sigma
+            assert(sigma_bits == v->width()); // TODO Not valid because EPR uses effective sigma, the text uses sigma
             m_v = v;
 
             for (value_type v = 0; v < alphabet_size; ++v)
             {
                 masks[v] = v;
-                for (uint8_t i = t_b * 2; i < 64; i <<= 1)
+                for (uint8_t i = sigma_bits * 2; i < 64; i <<= 1)
                     masks[v] |= masks[v] << i;
             }
 
             uint64_t tmp_carry = masks[1];
             for (value_type v = 0; v < alphabet_size; ++v)
-                masks[v] |= tmp_carry << t_b;
+                masks[v] |= tmp_carry << sigma_bits;
         }
     }
 

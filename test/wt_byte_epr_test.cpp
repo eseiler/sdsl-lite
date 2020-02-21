@@ -24,9 +24,9 @@ class wt_byte_epr_test : public ::testing::Test { };
 using testing::Types;
 
 typedef Types<
-    // wt_epr<4>//,
-    wt_epr<5>//,
-    // wt_epr<6>
+    wt_epr<4>,
+    wt_epr<5>,
+    wt_epr<6>
 > Implementations;
 
 TYPED_TEST_CASE(wt_byte_epr_test, Implementations);
@@ -35,7 +35,7 @@ TYPED_TEST(wt_byte_epr_test, create_and_store)
 {
     static_assert(sdsl::util::is_regular<TypeParam>::value, "Type is not regular");
     std::mt19937_64 gen(12345); // random but fixed text
-    std::uniform_int_distribution<> dis(1, TypeParam::fixed_alphabet_size); // no 0 allowed
+    std::uniform_int_distribution<> dis(0, TypeParam::fixed_alphabet_size-1); // no 0 allowed
 
     text.resize(500);
 
@@ -118,8 +118,8 @@ TYPED_TEST(wt_byte_epr_test, rank)
     // Test rank(i, c) for each character c and position i
     std::vector<size_t> cnt_prefix_rank(wt.sigma, 0);
     // 234 332 143 211 345
-    auto x = wt.rank(15, 4);
-    (void) x;
+    // auto x = wt.rank(15, 4);
+    // (void) x;
     for (size_t i = 0; i < text.size() + 1; ++i)
     {
         for (size_t c = 0; c < wt.sigma; ++c)
@@ -128,15 +128,16 @@ TYPED_TEST(wt_byte_epr_test, rank)
                 ++cnt_prefix_rank[c];
 
             // auto const rank = rb(i, c);
+            // std::cout << "i=" << i << " c=" << c << '\n';
             if (c > 0)
-                ASSERT_EQ(cnt_prefix_rank[c] - cnt_prefix_rank[c - 1], wt.rank(i, c)) << "i=" << i << " c=" << c << "/" << wt.sigma;
+                ASSERT_EQ(cnt_prefix_rank[c] - cnt_prefix_rank[c - 1], wt.rank(i, c)) << "i=" << i << " c=" << c << "/" << wt.sigma - 1;
             else
-                ASSERT_EQ(cnt_prefix_rank[c], wt.rank(i, c)) << "i=" << i << " c=" << c << "/" << wt.sigma;
+                ASSERT_EQ(cnt_prefix_rank[c], wt.rank(i, c)) << "i=" << i << " c=" << c << "/" << wt.sigma - 1;
 
             if (c > 0)
             {
                 auto lex = wt.lex_smaller_count(i, c);
-                ASSERT_EQ(cnt_prefix_rank[c - 1], std::get<1>(lex)) << "i=" << i << " c=" << c << "/" << wt.sigma;
+                ASSERT_EQ(cnt_prefix_rank[c - 1], std::get<1>(lex)) << "i=" << i << " c=" << c << "/" << wt.sigma - 1;
             }
         }
     }
