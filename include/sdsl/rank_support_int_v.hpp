@@ -149,6 +149,7 @@ public:
 	     */
 	size_type rank(const size_type idx, const value_type v) const
 	{
+		assert(values_per_word == 21);
 		assert(this->m_v != nullptr);
 		assert(idx <= this->m_v->size());
 
@@ -173,7 +174,7 @@ public:
 		assert(idx <= this->m_v->size());
         assert(v <= this->t_v);
 
-		if (unlikely(v == this->t_v - 1))
+		if (unlikely(v == this->t_v/* - 1*/)) // TODO actually
 			return idx;
 
 		constexpr uint8_t t_v_decr{this->t_v - 1};

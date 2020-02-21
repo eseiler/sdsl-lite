@@ -42,7 +42,7 @@ public:
     typedef wt_tag										index_category;
     typedef byte_alphabet_tag /*typename tree_strat_type::alphabet_category*/ alphabet_category;
     enum { lex_ordered = true };
-
+	static constexpr uint8_t fixed_alphabet_size{alphabet_size};
 private:
 
     size_type		m_size  = 0;  // original text size

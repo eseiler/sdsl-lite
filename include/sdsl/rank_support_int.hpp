@@ -60,6 +60,7 @@ protected:
 	const int_vector<>* m_v; //!< Pointer to the rank supported bit_vector
     static constexpr uint8_t t_v{alphabet_size};
     static constexpr uint8_t t_b{ceil_log2(alphabet_size)};
+    // static constexpr uint8_t t_b{alphabet_size};
 	static constexpr uint64_t even_mask{bm_rec<uint64_t>(bits::lo_set[t_b], t_b * 2, 64)};
 	static constexpr uint64_t carry_select_mask{bm_rec<uint64_t>(1ULL << t_b, t_b * 2, 64)};
 	uint64_t masks[alphabet_size]; // TODO: make constexpr and remove init()
@@ -127,7 +128,7 @@ protected:
     void init(const int_vector<>* v)
     {
         if (v != nullptr) {
-            assert(t_b == v->width());
+            assert(t_b == v->width()); // TODO Not valid because EPR uses effective sigma, the text uses sigma
             m_v = v;
 
             for (value_type v = 0; v < alphabet_size; ++v)
