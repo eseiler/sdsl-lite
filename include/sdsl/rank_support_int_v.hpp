@@ -48,7 +48,7 @@ public:
 	explicit rank_support_int_v(const int_vector<>* v = nullptr) : rank_support_int<alphabet_size>(v)
 	{
 	    static_assert(blocks_per_superblock > 1, "There must be at least two blocks per superblock!");
-		constexpr uint8_t max_letter{this->sigma - 1};
+		constexpr uint8_t max_letter{static_cast<uint8_t>(this->sigma) - 1};
 
 		if (v == nullptr)
 		{
