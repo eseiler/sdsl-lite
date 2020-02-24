@@ -12,6 +12,7 @@
 
 //! Namespace for the succinct data structure library.
 namespace sdsl {
+namespace epr{
 
 //! A class supporting rank queries in linear time.
 /*! \par Space complexity
@@ -102,6 +103,6 @@ rank_support_int_scan<alphabet_size>::prefix_rank(const size_type idx, const val
 	return result + this->word_prefix_rank(p, idx, v);
 }
 
-} // end namespace sds
-
+} // end namespace epr
+} // end namespace sdsl
 #endif // end file

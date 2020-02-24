@@ -24,6 +24,7 @@
 
 //! Namespace for the succinct data structure library.
 namespace sdsl {
+namespace epr {
 
 //! The base class of classes supporting rank_queries for a sdsl::int_vector in constant time.
 /*!
@@ -206,6 +207,7 @@ inline rank_support_int<alphabet_type>::rank_support_int(const int_vector<>* v)
     init(v);
 }
 
+} // end namespace epr
 } // end namespace sdsl
 
 #include "rank_support_int_v.hpp"

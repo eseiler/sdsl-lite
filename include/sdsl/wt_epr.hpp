@@ -18,6 +18,7 @@
 
 //! Namespace for the succinct data structure library.
 namespace sdsl {
+namespace epr {
 
 //! An EPR-dictionary based wavelet.
 /*!
@@ -303,7 +304,7 @@ public:
     size_type
     serialize(std::ostream& out, structure_tree_node* v = nullptr, std::string name = "") const
     {
-        structure_tree_node* child = structure_tree::add_child(v, name, util::class_name(*this));
+        structure_tree_node* child = structure_tree::add_child(v, name, sdsl::util::class_name(*this));
         size_type written_bytes = 0;
         written_bytes += write_member(m_size, out, child, "size");
         written_bytes += write_member(m_sigma, out, child, "sigma");
@@ -342,6 +343,8 @@ public:
     }
 
 };
+}
+using epr::wt_epr;
 }
 
 #endif

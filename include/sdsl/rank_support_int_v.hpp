@@ -12,6 +12,7 @@
 
 //! Namespace for the succinct data structure library.
 namespace sdsl {
+namespace epr {
 
 //! A rank structure proposed by Christopher Pockrandt
 /*!
@@ -227,7 +228,7 @@ public:
 
 	size_type serialize(std::ostream& out, structure_tree_node* v = nullptr, const std::string name = "") const
 	{
-		structure_tree_node* child = structure_tree::add_child(v, name, util::class_name(*this));
+		structure_tree_node* child = structure_tree::add_child(v, name, sdsl::util::class_name(*this));
 		size_type written_bytes = 0;
 		written_bytes += m_block.serialize(out, child, "prefix_block_counts");
 		written_bytes += m_superblock.serialize(out, child, "prefix_superblock_counts");
@@ -264,6 +265,7 @@ public:
 	}
 };
 
+} // end namespace epr
 } // end namespace sdsl
 
 #endif // end file

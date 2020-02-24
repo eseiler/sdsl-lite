@@ -459,6 +459,17 @@ struct is_regular
 
 } // end namespace util
 
+namespace epr
+{
+namespace util
+{
+	template <class t_int_vec>
+	void set_to_value(t_int_vec& v, uint64_t k);
+	template <class t_int_vec, class t_int_vec_iterator>
+	void set_to_value(t_int_vec& v, uint64_t k, t_int_vec_iterator it);
+}
+}
+
 //==================== Template functions ====================
 
 template <class t_int_vec>
@@ -601,8 +612,67 @@ void util::set_to_value(t_int_vec& v, uint64_t k)
 		*(data++) = the_value;
 }
 
+template <class t_int_vec>
+void epr::util::set_to_value(t_int_vec& v, uint64_t k)
+{
+	uint64_t* data = v.data();
+	if (v.empty()) return;
+	uint8_t int_width = v.width();
+	if (int_width == 0) {
+		throw std::logic_error("util::set_to_value can not be performed with int_width=0!");
+	}
+	if (0 == k) {
+		sdsl::util::_set_zero_bits(v);
+		return;
+	}
+	if (bits::lo_set[int_width] == k) {
+		sdsl::util::_set_one_bits(v);
+		return;
+	}
+
+	uint64_t the_value{0};
+	k &= bits::lo_set[int_width];
+	for (uint8_t i = 0; i <= 64 - int_width; i += int_width)
+		the_value |= (k << i);
+
+	for (size_t i = 0; i < (v.bit_size() + 63) >> 6; ++i)
+		*(data++) = the_value;
+}
+
 template <class t_int_vec, class t_int_vec_iterator>
 void util::set_to_value(t_int_vec& v, uint64_t k, t_int_vec_iterator it)
+{
+	typedef typename t_int_vec::size_type size_type;
+
+	if (v.empty()) return;
+	uint8_t int_width = v.width();
+	if (int_width == 0) {
+		throw std::logic_error("util::set_to_value can not be performed with int_width=0!");
+	}
+
+	uint64_t the_value{0};
+	k &= bits::lo_set[int_width];
+	for (uint8_t i = 0; i <= 64 - int_width; i += int_width)
+		the_value |= (k << i);
+
+	size_type words        = (v.bit_size() + 63) >> 6;
+	size_type word_pos     = (it - v.begin()) / v.elements_per_word;
+	uint8_t   pos_in_word  = ((it - v.begin()) - word_pos * v.elements_per_word) * int_width;
+
+	uint64_t* data = v.data() + word_pos;
+	*(data) &= bits::lo_set[pos_in_word]; // unset first bits
+	*(data) |= (bits::lo_unset[pos_in_word] & the_value); // set last bits
+	++word_pos;
+
+	while (word_pos < words)
+	{
+		*(++data) = the_value;
+		++word_pos;
+	}
+}
+
+template <class t_int_vec, class t_int_vec_iterator>
+void epr::util::set_to_value(t_int_vec& v, uint64_t k, t_int_vec_iterator it)
 {
 	typedef typename t_int_vec::size_type size_type;
 
