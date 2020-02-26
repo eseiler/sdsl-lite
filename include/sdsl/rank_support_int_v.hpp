@@ -194,8 +194,10 @@ public:
 		// std::cout << "res1=" << res << '\n';
 
 		// retrieve block value
-        if (block_id_in_superblock > 0)
-            res += m_block[max_letter * superblock_id * (blocks_per_superblock - 1) + (block_id_in_superblock - 1)  * max_letter + v];
+		bool cache = block_id_in_superblock > 0;
+		res += cache * m_block[max_letter * (superblock_id * (blocks_per_superblock - 1) + (block_id_in_superblock - 1 + !cache)) + v];
+        // if (block_id_in_superblock > 0)
+            // res += m_block[max_letter * superblock_id * (blocks_per_superblock - 1) + (block_id_in_superblock - 1)  * max_letter + v];
 
 		// std::cout << "res2=" << res << '\n';
 		// compute in-block queries for all words before the in-block queries
