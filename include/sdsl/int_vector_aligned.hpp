@@ -1607,7 +1607,8 @@ auto int_vector<t_width>::get_int(size_type idx, const uint8_t len) const -> val
 #endif
 	size_t word_idx, idx_in_word;
 	std::tie(word_idx, idx_in_word) = position_with_wastebits(idx);
-	return bits::read_int(m_data + word_idx, idx_in_word * m_width, len);
+	// return bits::read_int(m_data + word_idx, idx_in_word * m_width, len);
+	return ((*(m_data + word_idx)) >> (idx_in_word * m_width)) & bits_impl<>::lo_set[len];
 }
 
 template <uint8_t t_width>
