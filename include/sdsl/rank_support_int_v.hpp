@@ -195,7 +195,7 @@ public:
 
 		// retrieve block value
 		size_type cache = block_id_in_superblock > 0;
-		res += cache * m_block[max_letter * (superblock_id * (blocks_per_superblock - 1) + (block_id_in_superblock - 1 + !cache)) + v];
+		res += cache * m_block[max_letter * (superblock_id * (blocks_per_superblock - 1) + (block_id_in_superblock + !cache - 1)) + v];
         // if (block_id_in_superblock > 0)
             // res += m_block[max_letter * superblock_id * (blocks_per_superblock - 1) + (block_id_in_superblock - 1)  * max_letter + v];
 
