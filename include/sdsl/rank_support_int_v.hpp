@@ -194,7 +194,7 @@ public:
 		// std::cout << "res1=" << res << '\n';
 
 		// retrieve block value
-		bool cache = block_id_in_superblock > 0;
+		size_type cache = block_id_in_superblock > 0;
 		res += cache * m_block[max_letter * (superblock_id * (blocks_per_superblock - 1) + (block_id_in_superblock - 1 + !cache)) + v];
         // if (block_id_in_superblock > 0)
             // res += m_block[max_letter * superblock_id * (blocks_per_superblock - 1) + (block_id_in_superblock - 1)  * max_letter + v];
