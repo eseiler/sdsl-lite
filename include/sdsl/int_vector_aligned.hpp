@@ -1605,9 +1605,13 @@ auto int_vector<t_width>::get_int(size_type idx, const uint8_t len) const -> val
 		"OUT_OF_RANGE_ERROR: int_vector::get_int(size_type, uint8_t); len>64!");
 	}
 #endif
-	size_t word_idx, idx_in_word;
-	std::tie(word_idx, idx_in_word) = position_with_wastebits(idx);
+	auto [word_idx, idx_in_word] = position_with_wastebits(idx);
 	// return bits::read_int(m_data + word_idx, idx_in_word * m_width, len);
+	// volatile uint64_t * a = m_data + word_idx;
+	// volatile uint64_t b = *a;
+	// volatile uint64_t c = idx_in_word * m_width;
+	// volatile uint64_t d = bits_impl<>::lo_set[len];//len==64 ? 0xFFFF'FFFF'FFFF'FFFF : (1ULL<<(len+1)) - 1;
+	// return (b >> c) & d;
 	return ((*(m_data + word_idx)) >> (idx_in_word * m_width)) & bits_impl<>::lo_set[len];
 }
 

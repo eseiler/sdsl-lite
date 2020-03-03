@@ -198,10 +198,11 @@ public:
          * \par Precondition
          *      \f$ i < size() \f$
          */
-    std::pair<size_type, value_type> inverse_select(size_type i) const
+    std::pair<size_type, value_type> inverse_select(size_type const i) const
     {
         assert(i < size());
-        return std::make_pair(m_bv_rank.rank(i, m_bv[i]), m_bv[i]);
+        size_type const cache = m_bv[i];
+        return std::make_pair(m_bv_rank.rank(i, cache), cache);
     }
 
     // TODO: implement (if necessary?)

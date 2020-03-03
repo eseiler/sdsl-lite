@@ -160,7 +160,10 @@ public:
 
 		// TODO: optimize this (and benchmark)
 		// std::cout << "prefix_rank(" << idx << ", " << (int)v-1 << ")=" << prefix_rank(idx, v-1) << '\n';
-		return prefix_rank(idx, v) - prefix_rank(idx, v - 1);
+		if (unlikely(v == this->sigma - 1))
+			return idx - prefix_rank(idx, v - 1);
+
+		return prefix_rank2(idx, v); //- prefix_rank(idx, v - 1);
 	}
 
 	//! Alias for rank(idx, v)
@@ -187,7 +190,8 @@ public:
 
 		size_type const block_id{idx / values_per_block};
 		size_type const superblock_id{block_id / blocks_per_superblock};
-        size_type const block_id_in_superblock{block_id % blocks_per_superblock};
+        size_type const block_id_in_superblock{block_id - blocks_per_superblock * superblock_id};
+      //size_type const block_id_in_superblock{block_id % blocks_per_superblock};
 
 		// retrieve superblock value
         size_type res = m_superblock[max_letter * superblock_id + v];
@@ -202,7 +206,7 @@ public:
 		// std::cout << "res2=" << res << '\n';
 		// compute in-block queries for all words before the in-block queries
 		// this only applies when multiple words are in one block
-        if (words_per_block > 1)
+        if constexpr (words_per_block > 1)
         {
             size_type const word_id{idx / values_per_word};
             uint64_t w{word_id - (word_id % words_per_block)};
@@ -216,14 +220,63 @@ public:
 
 		// compute in-block query
 		// std::cout << "values_per_block=" << values_per_block << '\n';
-		if (idx % values_per_block != 0)
-		{
-			res += this->word_prefix_rank(this->m_v->data(), idx, v);
+		// if (idx % values_per_block != 0)
+		// {
+		size_type cache2 = idx % values_per_block != 0;
+		res += cache2 * this->word_prefix_rank(this->m_v->data(), idx, v);
 			// std::cout << "idx=" << idx << '\n';
-		}
+		// }
 		// std::cout << "res4=" << res << '\n';
 
 		return res;
+	}
+
+	size_type prefix_rank2(const size_type idx, const value_type v) const
+	{
+		assert(this->m_v != nullptr);
+		assert(idx <= this->m_v->size());
+        assert(v <= this->sigma);
+
+		constexpr uint8_t const max_letter{this->sigma - 1};
+
+		size_type const block_id{idx / values_per_block};
+		size_type const superblock_id{block_id / blocks_per_superblock};
+		size_type const block_id_in_superblock{block_id - blocks_per_superblock * superblock_id};
+
+		size_type const access1 = max_letter * superblock_id + v;
+		auto it1 = m_superblock.begin() + (access1 - 1);
+		size_type res_lower = *it1;
+		++it1;
+		size_type res_upper = *it1;
+        // size_type res_upper = m_superblock[access1];
+        // size_type res_lower = m_superblock[access1 - 1];
+
+		size_type const cache = block_id_in_superblock > 0;
+		size_type const access2 = max_letter * (superblock_id * (blocks_per_superblock - 1) + (block_id_in_superblock + !cache - 1)) + v;
+		// res_upper += cache * m_block[access2];
+		// res_lower += cache * m_block[access2 - 1];
+		auto it2 = m_block.begin() + (access2 - 1);
+		res_lower += cache * (*it2);
+		++it2;
+		res_upper += cache * (*it2);
+
+        if constexpr (words_per_block > 1)
+        {
+            size_type const word_id{idx / values_per_word};
+            uint64_t w{word_id - (word_id % words_per_block)};
+            while (w < word_id)
+            {
+                res_upper += this->full_word_prefix_rank(this->m_v->data(), w, v);
+                res_lower += this->full_word_prefix_rank(this->m_v->data(), w, v - 1);
+                ++w;
+            }
+        }
+
+		size_type const cache2 = idx % values_per_block != 0;
+		res_upper += cache2 * this->word_prefix_rank(this->m_v->data(), idx, v);
+		res_lower += cache2 * this->word_prefix_rank(this->m_v->data(), idx, v - 1);
+
+		return res_upper - res_lower;
 	}
 
 	size_type size() const { return this->m_v->size(); }
