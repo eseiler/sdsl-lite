@@ -26,7 +26,11 @@ using testing::Types;
 typedef Types<
     wt_epr<4>,
     wt_epr<5>,
-    wt_epr<6>
+    wt_epr<6>,
+    wt_epr<7>,
+    wt_epr<12>,
+    wt_epr<13>,
+    wt_epr<17>
 > Implementations;
 
 TYPED_TEST_CASE(wt_byte_epr_test, Implementations);
@@ -37,7 +41,7 @@ TYPED_TEST(wt_byte_epr_test, create_and_store)
     std::mt19937_64 gen(12345); // random but fixed text
     std::uniform_int_distribution<> dis(0, TypeParam::fixed_alphabet_size-1); // no 0 allowed
 
-    text.resize(500);
+    text.resize(500000);
 
     for (auto it = text.begin(); it != text.end(); ++it)
         *it = dis(gen);

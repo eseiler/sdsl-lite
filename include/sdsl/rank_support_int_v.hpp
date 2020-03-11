@@ -30,7 +30,7 @@ namespace epr {
  *
  * @ingroup rank_support_group
  */
-template <uint8_t alphabet_size, uint8_t words_per_block = 1, uint8_t blocks_per_superblock = 4>
+template <uint8_t alphabet_size, uint8_t words_per_block = 1, uint8_t blocks_per_superblock = 4, uint8_t superblocks_per_ultrablock = 4>
 class rank_support_int_v : public rank_support_int<alphabet_size> {
 public:
 	typedef int_vector<> int_vector_type;
@@ -39,7 +39,8 @@ public:
 
 private:
 	int_vector<0> m_block;
-	int_vector<64> m_superblock; // TODO: set width (at runtime). benchmark space consumption and running time
+	int_vector<0> m_superblock; // TODO: set width (at runtime). benchmark space consumption and running time
+	int_vector<64> m_ultrablock;
 
 	static constexpr uint64_t values_per_word{64ULL / rank_support_int<alphabet_size>::sigma_bits};
 	static constexpr uint32_t values_per_block{words_per_block * values_per_word};
@@ -48,6 +49,7 @@ public:
 	explicit rank_support_int_v(const int_vector<>* v = nullptr) : rank_support_int<alphabet_size>(v)
 	{
 	    static_assert(blocks_per_superblock > 1, "There must be at least two blocks per superblock!");
+	    static_assert(superblocks_per_ultrablock > 1, "There must be at least two superblocks per ultrablock!");
 		constexpr uint8_t max_letter{static_cast<uint8_t>(this->sigma) - 1};
 
 		if (v == nullptr)
@@ -58,13 +60,18 @@ public:
 		{
 			m_block.resize(max_letter, 0);
 			m_superblock.resize(max_letter, 0);
+			m_ultrablock.resize(max_letter, 0);
 			return;
 		}
 
 		constexpr uint64_t words_per_superblock{words_per_block * blocks_per_superblock};
 		constexpr uint64_t values_per_superblock{blocks_per_superblock * values_per_block};
+		constexpr uint64_t words_per_ultrablock{words_per_superblock * superblocks_per_ultrablock};
+		constexpr uint64_t values_per_ultrablock{superblocks_per_ultrablock * values_per_superblock};
 		constexpr uint64_t new_width{ceil_log2(values_per_superblock)};
 		m_block.width(new_width);
+		constexpr uint64_t new_width2{ceil_log2(values_per_ultrablock)};
+		m_superblock.width(new_width2);
 
 		// NOTE: number of elements is artificially increased by one because rank can be called on m_v[size()]
 		uint64_t const word_count = ((this->m_v->size() - 1 + 1) / values_per_word) + 1; // equivalent to ceil(m_v->size() / values_per_word)
@@ -76,19 +83,25 @@ public:
 									  - ((blocks_per_superblock - (block_count % blocks_per_superblock)) % blocks_per_superblock);
 		size_type const block_size = blocks_needed * max_letter;
 		size_type const superblock_size = (((word_count - 1) / words_per_superblock) + 1) * max_letter; // equivalent to ceil(word_count / words_per_superblock) * max_letter
-		m_block.resize(block_size);
+		size_type const ultrablock_size = (((word_count - 1) / words_per_ultrablock) + 1) * max_letter; // equivalent to ceil(word_count / words_per_ultrablock) * max_letter
+		m_block.resize(block_size + max_letter);
 		m_superblock.resize(superblock_size);
+		m_ultrablock.resize(ultrablock_size);
 
 		uint64_t const * data = this->m_v->data();
 		std::vector<uint64_t> buf_blocks(max_letter, 0);
 		std::vector<uint64_t> buf_superblocks(max_letter, 0);
+		std::vector<uint64_t> buf_ultrablocks(max_letter, 0);
 
 		for (uint64_t v = 0; v < max_letter; ++v)
+		{
 			m_superblock[v] = 0;
+			m_ultrablock[v] = 0;
+		}
 
 		// Precompute blocks and superblocks
 		// NOTE: divisors in modulo operations are constexpr and hence are expected to be cheap
-		for (uint64_t word_id = 0, block_id = 0, superblock_id = max_letter; word_id < word_count; ++word_id)
+		for (uint64_t word_id = 0, block_id = 0, superblock_id = max_letter, ultrablock_id = max_letter; word_id < word_count; ++word_id)
 		{
 			for (uint64_t v = 0; v < max_letter; ++v)
 				buf_blocks[v] += this->full_word_prefix_rank(data, word_id, v);
@@ -96,18 +109,25 @@ public:
 			// counted the values in the last word of the current block
 			if (word_id % words_per_block == (words_per_block - 1))
 			{
-                if (word_id % words_per_superblock != (words_per_superblock - 1))
-                {
-                    if (block_id < m_block.size()) // TODO: rewrite for loop to eliminate need for if clause here
-                    {
-                        for (uint64_t v = 0; v < max_letter; ++v)
-                            m_block[block_id + v] = buf_blocks[v];
-                        block_id += max_letter;
-                    }
-                }
-                else
-                { // don't store block information for the last block in the superblock!
-                    if (superblock_id < m_superblock.size()) // TODO: rewrite for loop to eliminate need for if clause here
+				// Done with ultrablock
+				if (word_id % words_per_ultrablock == (words_per_ultrablock - 1))
+				{
+					// std::cout << "MOO\n";
+					if (ultrablock_id < m_ultrablock.size())
+					{
+						for (uint64_t v = 0; v < max_letter; ++v)
+						{
+							buf_ultrablocks[v] += buf_superblocks[v];
+							m_ultrablock[ultrablock_id + v] = buf_ultrablocks[v];
+							buf_superblocks[v] = 0;
+						}
+					}
+					ultrablock_id += max_letter;
+				}
+				// Done with superblock
+				if (word_id % words_per_superblock == (words_per_superblock - 1))
+				{
+					if (superblock_id < m_superblock.size()) // TODO: rewrite for loop to eliminate need for if clause here
                     {
                         for (uint64_t v = 0; v < max_letter; ++v)
                         {
@@ -116,14 +136,24 @@ public:
                             buf_blocks[v] = 0; // reset blocks
                         }
                     }
-                    superblock_id += max_letter;
-                }
+					superblock_id += max_letter;
+				}
+				else // else only block is done
+				{
+					if (block_id < m_block.size()) // TODO: rewrite for loop to eliminate need for if clause here
+					{
+						for (uint64_t v = 0; v < max_letter; ++v)
+							m_block[block_id + v] = buf_blocks[v];
+						block_id += max_letter;
+					}
+				}
 			}
 		}
 
         // std::cout << "\nBlocks:\n";
         // for (uint64_t i = 0; i < m_block.size(); i += max_letter)
 		// {
+		// 	std::cout << "0 ";
 		// 	for (uint64_t v = 0; v < max_letter; ++v)
 	    //         std::cout << (unsigned)m_block[i + v] << ' ';
         //     std::cout << "| ";
@@ -131,8 +161,17 @@ public:
         // std::cout << "\nSuperBlocks:\n";
         // for (uint64_t i = 0; i < m_superblock.size(); i += max_letter)
 		// {
+		// 	std::cout << "0 ";
 		// 	for (uint64_t v = 0; v < max_letter; ++v)
         //     	std::cout << (unsigned)m_superblock[i + v] << ' ';
+        //     std::cout << "| ";
+		// }
+        // std::cout << "\nUltraBlocks:\n";
+        // for (uint64_t i = 0; i < m_ultrablock.size(); i += max_letter)
+		// {
+		// 	std::cout << "0 ";
+		// 	for (uint64_t v = 0; v < max_letter; ++v)
+        //     	std::cout << (unsigned)m_ultrablock[i + v] << ' ';
         //     std::cout << "| ";
 		// }
         // std::cout << "\n\n";
@@ -191,10 +230,14 @@ public:
 		size_type const block_id{idx / values_per_block};
 		size_type const superblock_id{block_id / blocks_per_superblock};
         size_type const block_id_in_superblock{block_id - blocks_per_superblock * superblock_id};
+		size_type const ultrablock_id{superblock_id / superblocks_per_ultrablock};
+        // size_type const superblock_id_in_ultrablock{superblock_id - superblocks_per_ultrablock * ultrablock_id};
       //size_type const block_id_in_superblock{block_id % blocks_per_superblock};
 
+	    // retrieve ultrablock value
+	  	size_type res = m_ultrablock[max_letter * ultrablock_id + v];
 		// retrieve superblock value
-        size_type res = m_superblock[max_letter * superblock_id + v];
+        res += m_superblock[max_letter * superblock_id + v];
 		// std::cout << "res1=" << res << '\n';
 
 		// retrieve block value
@@ -242,12 +285,20 @@ public:
 		size_type const block_id{idx / values_per_block};
 		size_type const superblock_id{block_id / blocks_per_superblock};
 		size_type const block_id_in_superblock{block_id - blocks_per_superblock * superblock_id};
+		size_type const ultrablock_id{superblock_id / superblocks_per_ultrablock};
+		// size_type const superblock_id_in_ultrablock{superblock_id - superblocks_per_ultrablock * ultrablock_id};
 
-		size_type const access1 = max_letter * superblock_id + v;
-		auto it1 = m_superblock.begin() + (access1 - 1);
-		size_type res_lower = *it1;
+		size_type const access0 = max_letter * ultrablock_id + v - 1;
+		auto it0 = m_ultrablock.begin() + access0;
+		size_type res_lower = *it0;
+		++it0;
+		size_type res_upper = *it0;
+
+		size_type const access1 = max_letter * superblock_id + v - 1;
+		auto it1 = m_superblock.begin() + access1;
+		res_lower += *it1;
 		++it1;
-		size_type res_upper = *it1;
+		res_upper += *it1;
         // size_type res_upper = m_superblock[access1];
         // size_type res_lower = m_superblock[access1 - 1];
 
@@ -287,6 +338,7 @@ public:
 		size_type written_bytes = 0;
 		written_bytes += m_block.serialize(out, child, "prefix_block_counts");
 		written_bytes += m_superblock.serialize(out, child, "prefix_superblock_counts");
+		written_bytes += m_ultrablock.serialize(out, child, "prefix_ultrablock_counts");
 		structure_tree::add_size(child, written_bytes);
 		return written_bytes;
 	}
@@ -296,6 +348,7 @@ public:
 		this->m_v = v;
 		m_block.load(in);
 		m_superblock.load(in);
+		m_ultrablock.load(in);
 		this->init(v);
 	}
 
@@ -304,6 +357,7 @@ public:
 	{
 		ar(CEREAL_NVP(m_block));
 		ar(CEREAL_NVP(m_superblock));
+		ar(CEREAL_NVP(m_ultrablock));
 	}
 
 	template <typename archive_t>
@@ -311,6 +365,7 @@ public:
 	{
 		ar(CEREAL_NVP(m_block));
 		ar(CEREAL_NVP(m_superblock));
+		ar(CEREAL_NVP(m_ultrablock));
 	}
 
 	void set_vector(const int_vector<>* v = nullptr)
