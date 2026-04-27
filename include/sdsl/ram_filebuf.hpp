@@ -21,6 +21,10 @@ class ram_filebuf : public std::streambuf
 private:
     // TODO:  also store filename/descriptor to implement is_open ???
     ram_fs::content_type * m_ram_file = nullptr; // file handle
+    std::ptrdiff_t get_pos() const
+    {
+        return (eback() != nullptr && gptr() != nullptr) ? (gptr() - eback()) : 0;
+    }
     void pbump64(std::ptrdiff_t x)
     {
         while (x > std::numeric_limits<int>::max())
@@ -192,11 +196,12 @@ public:
         {
             if (epptr() - pbase() == (std::ptrdiff_t)m_ram_file->size() and epptr() == pptr())
             {
+                std::ptrdiff_t const read_pos = get_pos();
                 m_ram_file->insert(m_ram_file->end(), s, s + n);
                 setp(m_ram_file->data(), m_ram_file->data() + m_ram_file->size());
                 std::ptrdiff_t add = epptr() - pbase();
                 pbump64(add);
-                setg(m_ram_file->data(), gptr(), m_ram_file->data() + m_ram_file->size());
+                setg(m_ram_file->data(), m_ram_file->data() + read_pos, m_ram_file->data() + m_ram_file->size());
                 return n;
             }
             else
@@ -222,11 +227,12 @@ public:
     {
         if (m_ram_file)
         {
+            std::ptrdiff_t const read_pos = get_pos();
             m_ram_file->push_back(c);
             setp(m_ram_file->data(), m_ram_file->data() + m_ram_file->size());
             std::ptrdiff_t add = epptr() - pbase();
             pbump64(add);
-            setg(m_ram_file->data(), gptr(), m_ram_file->data() + m_ram_file->size());
+            setg(m_ram_file->data(), m_ram_file->data() + read_pos, m_ram_file->data() + m_ram_file->size());
         }
         return traits_type::to_int_type(c);
     }
